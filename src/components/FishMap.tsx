@@ -72,6 +72,11 @@ export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange
     return () => {
       map.remove();
       mapRef.current = null;
+      markersRef.current.clear();
+      popupRootsRef.current.forEach(root => {
+        try { root.unmount(); } catch (_) {}
+      });
+      popupRootsRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

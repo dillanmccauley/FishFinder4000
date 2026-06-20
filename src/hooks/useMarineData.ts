@@ -76,19 +76,24 @@ export function useMarineData(location: LatLng): MarineDataResult {
 
   function getConditionsAt(loc: LatLng, targetDate: Date): MarineConditions | null {
     const rounded = startOfHour(targetDate);
-    const iso = rounded.toISOString().slice(0, 16).replace('T', 'T'); // keep ISO format
+    const iso = rounded.toISOString().slice(0, 16);
     const key = cacheKey(loc.lat, loc.lng, iso);
 
-    // Try exact match first, then nearest hour in cache
     if (CACHE[key]) return CACHE[key];
 
-    // Find nearest cached entry for this location
     const locPrefix = `${loc.lat.toFixed(2)},${loc.lng.toFixed(2)}@`;
     const targetMs = rounded.getTime();
     let best: MarineConditions | null = null;
     let bestDiff = Infinity;
     for (const [k, v] of Object.entries(CACHE)) {
       if (!k.startsWith(locPrefix)) continue;
+      const diff = Math.abs(v.timestamp.getTime() - targetMs);
+      if (diff < bestDiff) { bestDiff = diff; best = v; }
+    }
+    if (best) return best;
+
+    // Final fallback: nearest time from ANY cached location
+    for (const [, v] of Object.entries(CACHE)) {
       const diff = Math.abs(v.timestamp.getTime() - targetMs);
       if (diff < bestDiff) { bestDiff = diff; best = v; }
     }
