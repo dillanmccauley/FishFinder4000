@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0f172a;
+  color: #f1f5f9;
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #1e293b;
+}
+
+/* Custom zone marker */
+.zone-marker-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  font-weight: 800;
+  font-size: 13px;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.zone-marker-icon:hover {
+  transform: scale(1.15);
+}
+
+/* Leaflet popup override */
+.leaflet-popup-content-wrapper {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 0;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  min-width: 300px;
+}
+
+.leaflet-popup-content {
+  margin: 0;
+  width: 100% !important;
+}
+
+.leaflet-popup-tip {
+  background: #1e293b;
+}
+
+.leaflet-popup-close-button {
+  color: #94a3b8 !important;
+  font-size: 18px !important;
+  top: 10px !important;
+  right: 10px !important;
+}
+
+.leaflet-popup-close-button:hover {
+  color: #f1f5f9 !important;
+}
+
+/* Time scrubber */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: #334155;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #38bdf8;
+  cursor: pointer;
+  border: 2px solid #0f172a;
+  box-shadow: 0 0 6px rgba(56,189,248,0.5);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #38bdf8;
+  cursor: pointer;
+  border: 2px solid #0f172a;
+}
+
+/* Confidence badge pulse */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.confidence-decay {
+  animation: pulse-soft 2s infinite;
+}
+
+/* Grade ring on popup */
+.grade-ring {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 22px;
+  color: white;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+/* Scrollbar for popup */
+.popup-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.popup-scroll::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+.popup-scroll::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 2px;
+}
+
