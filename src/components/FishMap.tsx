@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import { createRoot } from 'react-dom/client';
-import type { LatLng, ZoneScore } from '../types';
+import type { LatLng, ZoneScore, Hotspot } from '../types';
 import { HOTSPOTS } from '../data/hotspots';
 import { GRADE_COLORS } from '../utils/scoring';
 import { ZonePopup } from './ZonePopup';
@@ -21,11 +21,14 @@ const HOTSPOT_TYPE_SIZE: Record<string, number> = {
   pass: 38,
 };
 
-function makeZoneIcon(grade: string, color: string, type: string): L.DivIcon {
+function makeZoneIcon(grade: string, color: string, type: string, isCustom = false): L.DivIcon {
   const size = HOTSPOT_TYPE_SIZE[type] ?? 34;
+  const shadow = isCustom
+    ? `0 0 0 3px ${color}40, 0 0 0 5px rgba(255,255,255,0.6), 0 2px 8px rgba(0,0,0,0.5)`
+    : `0 0 0 3px ${color}40, 0 2px 8px rgba(0,0,0,0.5)`;
   return L.divIcon({
     className: '',
-    html: `<div class="zone-marker-icon" style="width:${size}px;height:${size}px;background:${color};box-shadow:0 0 0 3px ${color}40,0 2px 8px rgba(0,0,0,0.5)">${grade}</div>`,
+    html: `<div class="zone-marker-icon" style="width:${size}px;height:${size}px;background:${color};box-shadow:${shadow}">${grade}</div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
     popupAnchor: [0, -size / 2 - 4],
@@ -35,11 +38,22 @@ function makeZoneIcon(grade: string, color: string, type: string): L.DivIcon {
 interface Props {
   userLocation: LatLng;
   zoneScores: Map<string, ZoneScore>;
-  onMapReady?: (map: LeafletMap) => void;
+  customZones: Hotspot[];
   onLocationChange: (location: LatLng, label: string) => void;
+  onRequestCreateZone: (loc: LatLng) => void;
+  onRemoveCustomZone: (id: string) => void;
+  onMapReady?: (map: LeafletMap) => void;
 }
 
-export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange }: Props) {
+export function FishMap({
+  userLocation,
+  zoneScores,
+  customZones,
+  onLocationChange,
+  onRequestCreateZone,
+  onRemoveCustomZone,
+  onMapReady,
+}: Props) {
   const mapRef = useRef<LeafletMap | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
@@ -47,6 +61,14 @@ export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange
   const userMarkerRef = useRef<L.Marker | null>(null);
   const popupRootsRef = useRef<Map<string, ReturnType<typeof createRoot>>>(new Map());
   const [legendVisible, setLegendVisible] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+
+  // Combined hotspot map (regular + custom)
+  const allHotspotsMap = useMemo(() => {
+    const m = new Map<string, Hotspot>(HOTSPOTS.map(h => [h.id, h]));
+    customZones.forEach(z => m.set(z.id, z));
+    return m;
+  }, [customZones]);
 
   // Initialize map once
   useEffect(() => {
@@ -64,7 +86,6 @@ export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange
       maxZoom: 19,
     }).addTo(map);
 
-    // Add zoom control in bottom-left
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
     mapRef.current = map;
@@ -82,6 +103,27 @@ export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Map click handler for zone creation mode
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const handler = (e: L.LeafletMouseEvent) => {
+      if (!isCreating) return;
+      onRequestCreateZone({ lat: e.latlng.lat, lng: e.latlng.lng });
+      setIsCreating(false);
+    };
+
+    map.on('click', handler);
+    return () => { map.off('click', handler); };
+  }, [isCreating, onRequestCreateZone]);
+
+  // Cursor style in creation mode
+  useEffect(() => {
+    if (!containerRef.current) return;
+    containerRef.current.style.cursor = isCreating ? 'crosshair' : '';
+  }, [isCreating]);
+
   // Update user location marker and radius circle
   useEffect(() => {
     const map = mapRef.current;
@@ -90,7 +132,6 @@ export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange
     if (userMarkerRef.current) userMarkerRef.current.remove();
     if (circleRef.current) circleRef.current.remove();
 
-    // User location dot
     const userIcon = L.divIcon({
       className: '',
       html: `<div style="width:16px;height:16px;border-radius:50%;background:#38bdf8;border:3px solid white;box-shadow:0 0 12px rgba(56,189,248,0.6)"></div>`,
@@ -101,7 +142,6 @@ export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange
       .bindTooltip('You are here', { direction: 'top', className: '' })
       .addTo(map);
 
-    // 25-mile radius circle
     circleRef.current = L.circle([userLocation.lat, userLocation.lng], {
       radius: RADIUS_MILES * METERS_PER_MILE,
       color: '#38bdf8',
@@ -114,27 +154,36 @@ export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange
     map.flyTo([userLocation.lat, userLocation.lng], 9, { duration: 1.2 });
   }, [userLocation]);
 
-  // Update zone markers when scores change
+  // Create/update zone markers when scores or custom zones change
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    HOTSPOTS.forEach(hotspot => {
-      const score = zoneScores.get(hotspot.id);
+    // Remove markers for zones that no longer exist
+    markersRef.current.forEach((marker, id) => {
+      if (!allHotspotsMap.has(id)) {
+        marker.remove();
+        markersRef.current.delete(id);
+        popupRootsRef.current.get(id)?.unmount();
+        popupRootsRef.current.delete(id);
+      }
+    });
+
+    allHotspotsMap.forEach((hotspot, id) => {
+      const score = zoneScores.get(id);
       if (!score) return;
 
       const color = GRADE_COLORS[score.grade];
-      const icon = makeZoneIcon(score.grade, color, hotspot.type);
+      const isCustom = id.startsWith('custom-');
+      const icon = makeZoneIcon(score.grade, color, hotspot.type, isCustom);
 
-      let marker = markersRef.current.get(hotspot.id);
+      let marker = markersRef.current.get(id);
       if (!marker) {
-        marker = L.marker([hotspot.location.lat, hotspot.location.lng], { icon })
-          .addTo(map);
+        marker = L.marker([hotspot.location.lat, hotspot.location.lng], { icon }).addTo(map);
 
-        // Create popup with React root
         const popupEl = document.createElement('div');
         const root = createRoot(popupEl);
-        popupRootsRef.current.set(hotspot.id, root);
+        popupRootsRef.current.set(id, root);
 
         const popup = L.popup({
           maxWidth: 340,
@@ -145,33 +194,78 @@ export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange
         }).setContent(popupEl);
 
         marker.bindPopup(popup);
-        markersRef.current.set(hotspot.id, marker);
+        markersRef.current.set(id, marker);
       } else {
         marker.setIcon(icon);
       }
     });
-  }, [zoneScores]);
+  }, [zoneScores, allHotspotsMap]);
 
-  // Update popup content when scores change
+  // Update popup content when scores or custom zones change
   useEffect(() => {
-    HOTSPOTS.forEach(hotspot => {
-      const score = zoneScores.get(hotspot.id);
-      const root = popupRootsRef.current.get(hotspot.id);
+    allHotspotsMap.forEach((hotspot, id) => {
+      const score = zoneScores.get(id);
+      const root = popupRootsRef.current.get(id);
       if (!score || !root) return;
-      root.render(<ZonePopup score={score} />);
+      const isCustom = id.startsWith('custom-');
+      root.render(
+        <ZonePopup
+          score={score}
+          hotspot={hotspot}
+          onRemove={isCustom ? () => { onRemoveCustomZone(id); } : undefined}
+        />
+      );
     });
-  }, [zoneScores]);
+  }, [zoneScores, allHotspotsMap, onRemoveCustomZone]);
 
   return (
     <div className="relative w-full h-full">
       <div ref={containerRef} className="w-full h-full" />
-      <SearchBar
-        onSelect={(loc, label) => {
-          onLocationChange(loc, label);
-        }}
-      />
+      <SearchBar onSelect={(loc, label) => onLocationChange(loc, label)} />
       <Legend visible={legendVisible} onToggle={() => setLegendVisible(v => !v)} />
       <NearMePanel userLocation={userLocation} zoneScores={zoneScores} />
+
+      {/* Add Zone FAB */}
+      <div className="absolute z-50" style={{ top: 56, right: 12 }}>
+        <button
+          onClick={() => setIsCreating(v => !v)}
+          title={isCreating ? 'Cancel — click map to place zone' : 'Add custom zone'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 12px',
+            borderRadius: 10,
+            background: isCreating ? '#0ea5e9' : '#1e293b',
+            border: `1px solid ${isCreating ? '#0ea5e9' : '#334155'}`,
+            color: isCreating ? '#0f172a' : '#94a3b8',
+            cursor: 'pointer',
+            fontSize: 12,
+            fontWeight: 700,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {isCreating ? '✕ Cancel' : '✎ Add Zone'}
+        </button>
+        {isCreating && (
+          <div
+            style={{
+              marginTop: 6,
+              padding: '6px 10px',
+              borderRadius: 8,
+              background: '#0ea5e920',
+              border: '1px solid #0ea5e940',
+              color: '#38bdf8',
+              fontSize: 11,
+              textAlign: 'center',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Click map to place zone
+          </div>
+        )}
+      </div>
 
       {/* Data attribution */}
       <div

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { ZoneScore, MarineConditions, TideInfo, BiteReport } from '../types';
+import type { ZoneScore, MarineConditions, TideInfo, BiteReport, Hotspot } from '../types';
 import { HOTSPOTS } from '../data/hotspots';
 import { SPECIES_MAP } from '../data/species';
 import {
@@ -18,6 +18,7 @@ interface Params {
   getTideAt: (stationId: string, date: Date) => TideInfo | null;
   biteReports: BiteReport[];
   nowDate: Date;
+  customHotspots?: Hotspot[];
 }
 
 export function useZoneScores({
@@ -26,20 +27,22 @@ export function useZoneScores({
   getTideAt,
   biteReports,
   nowDate,
+  customHotspots = [],
 }: Params): Map<string, ZoneScore> {
   return useMemo(() => {
     const map = new Map<string, ZoneScore>();
     const forecastHoursAhead = Math.max(0, (targetDate.getTime() - nowDate.getTime()) / 3600000);
     const isForecast = forecastHoursAhead > 0;
+    const allHotspots = [...HOTSPOTS, ...customHotspots];
 
-    HOTSPOTS.forEach((hotspot) => {
+    allHotspots.forEach((hotspot) => {
       const species = hotspot.activeSpeciesIds.map(id => SPECIES_MAP.get(id)!).filter(Boolean);
       const conditions = getConditionsAt(hotspot.location, targetDate);
       const tide = getTideAt(hotspot.tideStationId, targetDate);
       const hotspotReports = biteReports.filter(r => r.hotspotId === hotspot.id);
 
       const biteScore = isForecast
-        ? calcBiteScore(hotspotReports, targetDate) * 0.7 // reduce bite weight for future
+        ? calcBiteScore(hotspotReports, targetDate) * 0.7
         : calcBiteScore(hotspotReports, targetDate);
 
       const marineScore = calcMarineScore(conditions, species);
@@ -70,5 +73,5 @@ export function useZoneScores({
     });
 
     return map;
-  }, [targetDate, getConditionsAt, getTideAt, biteReports, nowDate]);
+  }, [targetDate, getConditionsAt, getTideAt, biteReports, nowDate, customHotspots]);
 }

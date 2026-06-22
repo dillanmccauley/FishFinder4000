@@ -6,8 +6,10 @@ import { useMarineData } from './hooks/useMarineData';
 import { useTideData } from './hooks/useTideData';
 import { useBiteReports } from './hooks/useBiteReports';
 import { useZoneScores } from './hooks/useZoneScores';
+import { useCustomZones } from './hooks/useCustomZones';
 import { FishMap } from './components/FishMap';
 import { TimeScrubber } from './components/TimeScrubber';
+import { CreateZoneModal } from './components/CreateZoneModal';
 import { HOTSPOTS } from './data/hotspots';
 
 const NOW = new Date();
@@ -16,6 +18,7 @@ export default function App() {
   const [offsetHours, setOffsetHours] = useState(0);
   const [mapCenter, setMapCenter] = useState<LatLng | null>(null);
   const [locationLabel, setLocationLabel] = useState('');
+  const [pendingZoneLoc, setPendingZoneLoc] = useState<LatLng | null>(null);
 
   const { location: gpsLocation, loading: gpsLoading, usingDefault } = useGeolocation();
   const activeCenter = mapCenter ?? gpsLocation;
@@ -26,6 +29,7 @@ export default function App() {
   const { getTideAt, loading: tideLoading } = useTideData(stationIds);
 
   const biteReports = useBiteReports();
+  const { customZones, addZone, removeZone } = useCustomZones();
   const targetDate = addHours(NOW, offsetHours);
 
   const zoneScores = useZoneScores({
@@ -34,6 +38,7 @@ export default function App() {
     getTideAt,
     biteReports,
     nowDate: NOW,
+    customHotspots: customZones,
   });
 
   const handleLocationChange = useCallback((loc: LatLng, label: string) => {
@@ -41,7 +46,16 @@ export default function App() {
     setLocationLabel(label);
   }, []);
 
+  const handleRequestCreateZone = useCallback((loc: LatLng) => {
+    setPendingZoneLoc(loc);
+  }, []);
+
+  const handleRemoveCustomZone = useCallback((id: string) => {
+    removeZone(id);
+  }, [removeZone]);
+
   const isLoading = gpsLoading || marineLoading || tideLoading;
+  const totalZones = HOTSPOTS.length + customZones.length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh', background: '#0f172a' }}>
@@ -81,7 +95,7 @@ export default function App() {
               letterSpacing: '0.05em',
             }}
           >
-            SE US COASTAL
+            US EAST COAST
           </span>
         </div>
 
@@ -106,41 +120,48 @@ export default function App() {
             </span>
           )}
           {isLoading && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 12,
-                color: '#64748b',
-              }}
-            >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b' }}>
               <Spinner />
               Loading data…
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#475569' }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
-            {HOTSPOTS.length} zones
+            {totalZones} zones{customZones.length > 0 && ` (${customZones.length} custom)`}
           </div>
         </div>
       </header>
 
-      {/* Map fills remaining space */}
+      {/* Map */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <FishMap
           userLocation={activeCenter}
           zoneScores={zoneScores}
+          customZones={customZones}
           onLocationChange={handleLocationChange}
+          onRequestCreateZone={handleRequestCreateZone}
+          onRemoveCustomZone={handleRemoveCustomZone}
         />
       </div>
 
-      {/* Time scrubber pinned to bottom */}
+      {/* Time scrubber */}
       <TimeScrubber
         offsetHours={offsetHours}
         onChange={setOffsetHours}
         nowDate={NOW}
       />
+
+      {/* Custom zone creation modal */}
+      {pendingZoneLoc && (
+        <CreateZoneModal
+          location={pendingZoneLoc}
+          onConfirm={(params) => {
+            addZone(params);
+            setPendingZoneLoc(null);
+          }}
+          onCancel={() => setPendingZoneLoc(null)}
+        />
+      )}
     </div>
   );
 }

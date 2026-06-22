@@ -1,8 +1,58 @@
 import { useState, useRef } from 'react';
 import type { LatLng } from '../types';
 
-// Quick lookup of SE US coastal areas for the search bar
-const SE_LOCATIONS: { name: string; location: LatLng }[] = [
+const COASTAL_LOCATIONS: { name: string; location: LatLng }[] = [
+  // Maine
+  { name: 'Portland, ME', location: { lat: 43.6591, lng: -70.2568 } },
+  { name: 'Kennebec River, ME', location: { lat: 43.8520, lng: -69.7690 } },
+  { name: 'Bar Harbor, ME', location: { lat: 44.3876, lng: -68.2039 } },
+  // New Hampshire
+  { name: 'Hampton Beach, NH', location: { lat: 42.9148, lng: -70.8100 } },
+  // Massachusetts
+  { name: 'Cape Cod Canal, MA', location: { lat: 41.7374, lng: -70.6120 } },
+  { name: 'Buzzards Bay, MA', location: { lat: 41.6502, lng: -70.8624 } },
+  { name: 'Plymouth, MA', location: { lat: 41.9584, lng: -70.6673 } },
+  { name: 'Boston, MA', location: { lat: 42.3601, lng: -71.0589 } },
+  { name: 'Gloucester, MA', location: { lat: 42.6159, lng: -70.6620 } },
+  // Rhode Island
+  { name: 'Newport, RI', location: { lat: 41.4901, lng: -71.3128 } },
+  { name: 'Narragansett, RI', location: { lat: 41.4321, lng: -71.4518 } },
+  { name: 'Block Island, RI', location: { lat: 41.1673, lng: -71.5614 } },
+  // Connecticut
+  { name: 'Niantic Bay, CT', location: { lat: 41.3218, lng: -72.1730 } },
+  { name: 'New Haven, CT', location: { lat: 41.3083, lng: -72.9279 } },
+  // New York
+  { name: 'Montauk, NY', location: { lat: 41.0718, lng: -71.8573 } },
+  { name: 'Fire Island, NY', location: { lat: 40.6218, lng: -73.3195 } },
+  { name: 'Sandy Hook, NY/NJ', location: { lat: 40.4618, lng: -74.0120 } },
+  // New Jersey
+  { name: 'Barnegat Inlet, NJ', location: { lat: 39.7517, lng: -74.1038 } },
+  { name: 'Cape May, NJ', location: { lat: 38.9351, lng: -74.9060 } },
+  // Delaware
+  { name: 'Indian River Inlet, DE', location: { lat: 38.6089, lng: -75.0699 } },
+  { name: 'Lewes, DE', location: { lat: 38.7743, lng: -75.1391 } },
+  // Maryland
+  { name: 'Ocean City, MD', location: { lat: 38.3254, lng: -75.0849 } },
+  { name: 'Tilghman Island, MD', location: { lat: 38.7127, lng: -76.3368 } },
+  { name: 'Annapolis, MD', location: { lat: 38.9784, lng: -76.4922 } },
+  // Virginia
+  { name: 'Virginia Beach, VA', location: { lat: 36.8529, lng: -75.9780 } },
+  { name: 'Chesapeake Bay Bridge-Tunnel, VA', location: { lat: 36.9726, lng: -76.1132 } },
+  { name: 'Norfolk, VA', location: { lat: 36.8468, lng: -76.2951 } },
+  // North Carolina
+  { name: 'Beaufort, NC', location: { lat: 34.7182, lng: -76.6616 } },
+  { name: 'Cape Fear, NC', location: { lat: 33.8600, lng: -77.9700 } },
+  { name: 'Wilmington, NC', location: { lat: 34.2257, lng: -77.9447 } },
+  // South Carolina
+  { name: 'Myrtle Beach, SC', location: { lat: 33.6891, lng: -78.8867 } },
+  { name: 'Charleston, SC', location: { lat: 32.7765, lng: -79.9311 } },
+  { name: 'Beaufort, SC', location: { lat: 32.4316, lng: -80.6698 } },
+  { name: 'Hilton Head Island, SC', location: { lat: 32.1163, lng: -80.7526 } },
+  // Georgia
+  { name: 'Savannah, GA', location: { lat: 32.0835, lng: -81.0998 } },
+  { name: 'Tybee Island, GA', location: { lat: 31.9983, lng: -80.8452 } },
+  { name: 'Brunswick, GA', location: { lat: 31.1499, lng: -81.4915 } },
+  // Florida East Coast
   { name: 'Jacksonville, FL', location: { lat: 30.3322, lng: -81.6557 } },
   { name: 'St. Augustine, FL', location: { lat: 29.8947, lng: -81.3145 } },
   { name: 'Daytona Beach, FL', location: { lat: 29.2108, lng: -81.0228 } },
@@ -11,19 +61,12 @@ const SE_LOCATIONS: { name: string; location: LatLng }[] = [
   { name: 'Indian River Lagoon, FL', location: { lat: 27.5500, lng: -80.4200 } },
   { name: 'Fort Pierce, FL', location: { lat: 27.4467, lng: -80.3256 } },
   { name: 'Stuart, FL', location: { lat: 27.1975, lng: -80.2528 } },
+  { name: 'Lake Worth / Palm Beach, FL', location: { lat: 26.7784, lng: -80.0370 } },
+  { name: 'Haulover Inlet, FL', location: { lat: 25.9003, lng: -80.1215 } },
+  // Florida West Coast
   { name: 'Naples, FL', location: { lat: 26.1420, lng: -81.7948 } },
   { name: 'Charlotte Harbor, FL', location: { lat: 26.8900, lng: -82.1000 } },
   { name: 'Boca Grande, FL', location: { lat: 26.7370, lng: -82.2570 } },
-  { name: 'Savannah, GA', location: { lat: 32.0835, lng: -81.0998 } },
-  { name: 'Tybee Island, GA', location: { lat: 31.9983, lng: -80.8452 } },
-  { name: 'Brunswick, GA', location: { lat: 31.1499, lng: -81.4915 } },
-  { name: 'Hilton Head Island, SC', location: { lat: 32.1163, lng: -80.7526 } },
-  { name: 'Beaufort, SC', location: { lat: 32.4316, lng: -80.6698 } },
-  { name: 'Charleston, SC', location: { lat: 32.7765, lng: -79.9311 } },
-  { name: 'Myrtle Beach, SC', location: { lat: 33.6891, lng: -78.8867 } },
-  { name: 'Wilmington, NC', location: { lat: 34.2257, lng: -77.9447 } },
-  { name: 'Cape Fear, NC', location: { lat: 33.8600, lng: -77.9700 } },
-  { name: 'Beaufort, NC', location: { lat: 34.7182, lng: -76.6616 } },
 ];
 
 interface Props {
@@ -36,10 +79,10 @@ export function SearchBar({ onSelect }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const results = query.length >= 2
-    ? SE_LOCATIONS.filter(l => l.name.toLowerCase().includes(query.toLowerCase())).slice(0, 6)
+    ? COASTAL_LOCATIONS.filter(l => l.name.toLowerCase().includes(query.toLowerCase())).slice(0, 6)
     : [];
 
-  function handleSelect(item: typeof SE_LOCATIONS[0]) {
+  function handleSelect(item: typeof COASTAL_LOCATIONS[0]) {
     onSelect(item.location, item.name);
     setQuery(item.name);
     setFocused(false);
@@ -63,7 +106,7 @@ export function SearchBar({ onSelect }: Props) {
         <input
           ref={inputRef}
           type="text"
-          placeholder="Search SE US coastal location..."
+          placeholder="Search US East Coast location..."
           value={query}
           onChange={e => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
