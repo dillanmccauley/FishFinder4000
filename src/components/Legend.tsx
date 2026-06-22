@@ -11,8 +11,7 @@ interface Props {
 export function Legend({ visible, onToggle }: Props) {
   return (
     <div
-      className="absolute bottom-36 right-3 z-50"
-      style={{ fontFamily: 'system-ui, sans-serif' }}
+      style={{ position: 'absolute', bottom: 144, right: 12, zIndex: 9999, fontFamily: 'system-ui, sans-serif' }}
     >
       <button
         onClick={onToggle}

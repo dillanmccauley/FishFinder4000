@@ -226,7 +226,7 @@ export function FishMap({
       <NearMePanel userLocation={userLocation} zoneScores={zoneScores} />
 
       {/* Add Zone FAB */}
-      <div className="absolute z-50" style={{ top: 56, right: 12 }}>
+      <div style={{ position: 'absolute', top: 56, right: 12, zIndex: 9999 }}>
         <button
           onClick={() => setIsCreating(v => !v)}
           title={isCreating ? 'Cancel — click map to place zone' : 'Add custom zone'}
@@ -234,15 +234,16 @@ export function FishMap({
             display: 'flex',
             alignItems: 'center',
             gap: 6,
-            padding: '7px 12px',
+            padding: '7px 14px',
             borderRadius: 10,
-            background: isCreating ? '#0ea5e9' : '#1e293b',
-            border: `1px solid ${isCreating ? '#0ea5e9' : '#334155'}`,
-            color: isCreating ? '#0f172a' : '#94a3b8',
+            background: isCreating ? '#0ea5e9' : '#1e293bef',
+            border: `1px solid ${isCreating ? '#7dd3fc' : '#38bdf8'}`,
+            color: isCreating ? '#0f172a' : '#38bdf8',
             cursor: 'pointer',
             fontSize: 12,
             fontWeight: 700,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
+            backdropFilter: 'blur(8px)',
             whiteSpace: 'nowrap',
           }}
         >
@@ -255,11 +256,12 @@ export function FishMap({
               padding: '6px 10px',
               borderRadius: 8,
               background: '#0ea5e920',
-              border: '1px solid #0ea5e940',
+              border: '1px solid #0ea5e960',
               color: '#38bdf8',
               fontSize: 11,
               textAlign: 'center',
               whiteSpace: 'nowrap',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
             }}
           >
             Click map to place zone
@@ -269,8 +271,9 @@ export function FishMap({
 
       {/* Data attribution */}
       <div
-        className="absolute bottom-24 left-3 z-50 text-xs rounded-lg px-2 py-1"
         style={{
+          position: 'absolute', bottom: 96, left: 12, zIndex: 9999,
+          fontSize: '0.75rem', borderRadius: 8, padding: '4px 8px',
           background: '#0f172aaa',
           color: '#64748b',
           backdropFilter: 'blur(4px)',

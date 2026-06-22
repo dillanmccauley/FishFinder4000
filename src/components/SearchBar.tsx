@@ -90,7 +90,7 @@ export function SearchBar({ onSelect }: Props) {
   }
 
   return (
-    <div className="absolute top-3 left-1/2 z-50" style={{ transform: 'translateX(-50%)', width: 320 }}>
+    <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', width: 320, zIndex: 9999 }}>
       <div
         className="flex items-center gap-2 px-3 py-2 rounded-xl"
         style={{

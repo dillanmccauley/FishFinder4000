@@ -62,7 +62,7 @@ export function NearMePanel({ userLocation, zoneScores }: Props) {
   const color = GRADE_COLORS[areaGrade];
 
   return (
-    <div className="absolute z-50" style={{ bottom: 148, left: 8, width: 224 }}>
+    <div style={{ position: 'absolute', bottom: 148, left: 8, width: 224, zIndex: 9999 }}>
       <div
         className="rounded-xl overflow-hidden"
         style={{
