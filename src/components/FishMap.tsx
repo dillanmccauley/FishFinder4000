@@ -8,6 +8,7 @@ import { GRADE_COLORS } from '../utils/scoring';
 import { ZonePopup } from './ZonePopup';
 import { SearchBar } from './SearchBar';
 import { Legend } from './Legend';
+import { NearMePanel } from './NearMePanel';
 
 const RADIUS_MILES = 25;
 const METERS_PER_MILE = 1609.34;
@@ -170,6 +171,7 @@ export function FishMap({ userLocation, zoneScores, onMapReady, onLocationChange
         }}
       />
       <Legend visible={legendVisible} onToggle={() => setLegendVisible(v => !v)} />
+      <NearMePanel userLocation={userLocation} zoneScores={zoneScores} />
 
       {/* Data attribution */}
       <div
