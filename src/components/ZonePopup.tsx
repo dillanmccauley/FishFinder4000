@@ -169,6 +169,16 @@ export function ZonePopup({ score, hotspot, onRemove }: Props) {
             ☔ {score.conditions.precipitationMm.toFixed(1)} mm/hr rainfall — expect reduced clarity inshore
           </div>
         )}
+        {score.algaePenalty >= 15 && (
+          <div style={{ fontSize: 10, color: '#a3e635', marginTop: 6, padding: '4px 8px', borderRadius: 6, background: '#84cc1612', border: '1px solid #84cc1640' }}>
+            🌿 High algae bloom risk — warm shallow water + summer season likely reducing visibility by {score.algaePenalty}+ pts
+          </div>
+        )}
+        {score.algaePenalty >= 5 && score.algaePenalty < 15 && (
+          <div style={{ fontSize: 10, color: '#84cc16', marginTop: 6 }}>
+            🌿 Moderate algae bloom risk — warm water may slightly reduce clarity
+          </div>
+        )}
       </div>
 
       {/* Water depth */}

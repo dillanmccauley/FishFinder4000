@@ -9,6 +9,7 @@ import {
   calcTideScore,
   calcZoneScore,
   calcClarityScore,
+  calcAlgaePenalty,
   scoreToGrade,
   calcConfidence,
 } from '../utils/scoring';
@@ -45,7 +46,8 @@ export function useZoneScores({
       const marineScore = calcMarineScore(conditions, species);
       const seasonScore = calcSeasonScore(species, targetDate, conditions?.waterTempF);
       const tideScore = calcTideScore(tide, species);
-      const clarityScore = calcClarityScore(conditions, hotspot.depthRangeFt);
+      const clarityScore = calcClarityScore(conditions, hotspot.depthRangeFt, targetDate);
+      const algaePenalty = calcAlgaePenalty(conditions, hotspot.depthRangeFt, targetDate);
       const total = calcZoneScore({ marineScore, seasonScore, tideScore, moonScore });
 
       map.set(hotspot.id, {
@@ -60,6 +62,7 @@ export function useZoneScores({
         moonPhaseName,
         moonPhaseEmoji,
         clarityScore,
+        algaePenalty,
         activeSpecies: species,
         conditions,
         tide,

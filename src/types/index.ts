@@ -70,6 +70,7 @@ export interface ZoneScore {
   moonPhaseName: string;
   moonPhaseEmoji: string;
   clarityScore: number;  // 0–100 estimated water clarity
+  algaePenalty: number;  // 0–26 pts deducted from clarity due to bloom risk
   activeSpecies: Species[];
   conditions: MarineConditions | null;
   tide: TideInfo | null;

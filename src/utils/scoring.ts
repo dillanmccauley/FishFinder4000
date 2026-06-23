@@ -164,16 +164,58 @@ export function calcZoneScore(params: {
 }
 
 /**
+ * Algae bloom penalty (0–26 pts) using a temperature × season × depth-zone proxy.
+ * Warm, nutrient-rich inshore/estuarine water in summer drives phytoplankton blooms
+ * that reduce underwater visibility. No external API needed — driven by existing
+ * Open-Meteo sea surface temperature and the target date's month.
+ *
+ * zoneFactor: tidal-flat 1.0 → deep 0 (offshore oligotrophic, far fewer nutrients)
+ * tempFactor: ≥85°F=1.0, ≥78°F=0.7, ≥68°F=0.35, <68°F=0 (cold inhibits growth)
+ * seasonFactor: May–Sept (months 4–8) = ×1.2 (longer days, peak bloom season)
+ * max penalty ≈ 1.0 × 1.2 × 1.0 × 22 = 26 pts (shallow flat, 85°F, July)
+ */
+export function calcAlgaePenalty(
+  conditions: MarineConditions | null,
+  depthRangeFt?: [number, number],
+  targetDate?: Date,
+): number {
+  if (!conditions || !targetDate) return 0;
+
+  const tempFactor =
+    conditions.waterTempF >= 85 ? 1.0
+    : conditions.waterTempF >= 78 ? 0.7
+    : conditions.waterTempF >= 68 ? 0.35
+    : 0;
+  if (tempFactor === 0) return 0;
+
+  const month = targetDate.getMonth();
+  const seasonFactor = month >= 4 && month <= 8 ? 1.2 : 1.0;
+
+  const mid = depthRangeFt ? (depthRangeFt[0] + depthRangeFt[1]) / 2 : 15;
+  const zoneFactor =
+    mid <= 5 ? 1.0
+    : mid <= 30 ? 0.85
+    : mid <= 100 ? 0.55
+    : mid <= 300 ? 0.20
+    : mid <= 600 ? 0.05
+    : 0;
+
+  return Math.round(tempFactor * seasonFactor * zoneFactor * 22);
+}
+
+/**
  * Water clarity score (0–100) derived from real Open-Meteo data:
  *   - Depth zone baseline (offshore = clearer by default)
  *   - Hourly precipitation (rainfall → runoff → inshore turbidity)
  *   - Wave height × shallow factor (sediment resuspension matters more in shallows)
+ *   - Algae bloom penalty (temperature × season × depth zone proxy)
  *
  * Higher score = clearer water.
  */
 export function calcClarityScore(
   conditions: MarineConditions | null,
   depthRangeFt?: [number, number],
+  targetDate?: Date,
 ): number {
   let base = 55;
   if (depthRangeFt) {
@@ -201,7 +243,9 @@ export function calcClarityScore(
     : conditions.waveHeightFt >= 0.5 ? 4
     : 0;
 
-  return Math.max(0, Math.min(100, Math.round(base - rainPenalty - rawWavePenalty * shallowFactor)));
+  const algaePenalty = calcAlgaePenalty(conditions, depthRangeFt, targetDate);
+
+  return Math.max(0, Math.min(100, Math.round(base - rainPenalty - rawWavePenalty * shallowFactor - algaePenalty)));
 }
 
 export interface ClarityInfo {
