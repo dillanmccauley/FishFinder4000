@@ -84,6 +84,7 @@ export function FishMap({
   const [selectionMode, setSelectionMode] = useState(false);
   const [rasterBBox, setRasterBBox] = useState<BBox | null>(null);
   const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
+  const [boxTooSmall, setBoxTooSmall] = useState(false);
 
   const { hourlyScores } = useLocationForecast({
     pin: pinLocation,
@@ -92,7 +93,7 @@ export function FishMap({
     nowDate,
   });
 
-  const { gridPoints, loading: rasterLoading, pointsLoaded, pointsTotal } = useRasterForecast(
+  const { gridPoints, loading: rasterLoading, pointsLoaded, pointsTotal, pointsFailed } = useRasterForecast(
     rasterBBox,
     targetDate,
     getConditionsAt,
@@ -206,9 +207,11 @@ export function FishMap({
       const minLng = Math.min(sw.lng, ne.lng);
       const maxLng = Math.max(sw.lng, ne.lng);
 
-      // Need at least a 0.1° box
-      if (maxLat - minLat < 0.05 || maxLng - minLng < 0.05) {
+      // Need at least 0.15° in each dimension to get ≥ 2 grid rows and columns at 0.1° step
+      if (maxLat - minLat < 0.15 || maxLng - minLng < 0.15) {
         setSelectionMode(false);
+        setBoxTooSmall(true);
+        setTimeout(() => setBoxTooSmall(false), 2500);
         return;
       }
 
@@ -467,6 +470,32 @@ export function FishMap({
             animation: 'spin 0.8s linear infinite',
           }} />
           Raster: {pointsLoaded} / {pointsTotal} points
+        </div>
+      )}
+
+      {/* Failed-fetch warning */}
+      {!rasterLoading && rasterBBox && pointsFailed > 0 && (
+        <div style={{
+          position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 9999, background: '#0f172aee', border: '1px solid #f59e0b66',
+          borderRadius: 8, padding: '6px 14px',
+          fontSize: 12, color: '#f59e0b', backdropFilter: 'blur(8px)',
+          whiteSpace: 'nowrap',
+        }}>
+          ⚠ {pointsFailed} point{pointsFailed > 1 ? 's' : ''} unavailable (no ocean data)
+        </div>
+      )}
+
+      {/* Box too small hint */}
+      {boxTooSmall && (
+        <div style={{
+          position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 9999, background: '#0f172aee', border: '1px solid #f59e0b66',
+          borderRadius: 8, padding: '6px 14px',
+          fontSize: 12, color: '#f59e0b', backdropFilter: 'blur(8px)',
+          whiteSpace: 'nowrap',
+        }}>
+          Draw a larger area (min ~10 mi)
         </div>
       )}
 

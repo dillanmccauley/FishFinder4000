@@ -35,6 +35,7 @@ const MAX_ALPHA = 0.75;
 
 export class RasterHeatLayer extends L.Layer {
   private _canvas: HTMLCanvasElement | null = null;
+  private _mapInstance: L.Map | null = null;
   private _grid: GridPoint[] = [];
   private _lats: number[] = [];
   private _lngs: number[] = [];
@@ -56,6 +57,7 @@ export class RasterHeatLayer extends L.Layer {
   }
 
   onAdd(map: L.Map): this {
+    this._mapInstance = map;
     const pane = map.getPane('overlayPane')!;
     this._canvas = document.createElement('canvas');
     this._canvas.style.position = 'absolute';
@@ -74,6 +76,7 @@ export class RasterHeatLayer extends L.Layer {
     if (this._rafId !== null) { cancelAnimationFrame(this._rafId); this._rafId = null; }
     this._canvas?.remove();
     this._canvas = null;
+    this._mapInstance = null;
     return this;
   }
 
@@ -118,7 +121,7 @@ export class RasterHeatLayer extends L.Layer {
   }
 
   private _render(): void {
-    const map = this._map as L.Map | undefined;
+    const map = this._mapInstance;
     if (!map || !this._canvas || this._grid.length === 0 || this._lats.length < 2 || this._lngs.length < 2) return;
 
     const size = map.getSize();

@@ -103,6 +103,7 @@ interface RasterForecastResult {
   loading: boolean;
   pointsLoaded: number;
   pointsTotal: number;
+  pointsFailed: number;
 }
 
 export function useRasterForecast(
@@ -114,6 +115,7 @@ export function useRasterForecast(
 ): RasterForecastResult {
   const [loadedSet, setLoadedSet] = useState<Set<string>>(new Set());
   const [pointsLoaded, setPointsLoaded] = useState(0);
+  const [pointsFailed, setPointsFailed] = useState(0);
   const [loading, setLoading] = useState(false);
   const abortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
 
@@ -134,15 +136,22 @@ export function useRasterForecast(
 
     setLoadedSet(new Set());
     setPointsLoaded(0);
+    setPointsFailed(0);
     setLoading(true);
 
     const newLoaded = new Set<string>();
     let done = 0;
+    let failed = 0;
 
     const tasks = gridLocs.map(pt => async () => {
       const ok = await fetchGridPoint(pt.lat, pt.lng);
       if (ctrl.cancelled) return;
-      if (ok) newLoaded.add(`${pt.lat.toFixed(4)},${pt.lng.toFixed(4)}`);
+      if (ok) {
+        newLoaded.add(`${pt.lat.toFixed(4)},${pt.lng.toFixed(4)}`);
+      } else {
+        failed++;
+        setPointsFailed(failed);
+      }
       done++;
       setPointsLoaded(done);
     });
@@ -170,5 +179,5 @@ export function useRasterForecast(
     return pts;
   }, [gridLocs, loadedSet, targetDate, getConditionsAt, getTideAt, nowDate]);
 
-  return { gridPoints, loading, pointsLoaded, pointsTotal: gridLocs.length };
+  return { gridPoints, loading, pointsLoaded, pointsTotal: gridLocs.length, pointsFailed };
 }
