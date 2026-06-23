@@ -163,6 +163,87 @@ export function calcZoneScore(params: {
   return Math.max(0, Math.min(100, raw));
 }
 
+/**
+ * Water clarity score (0–100) derived from real Open-Meteo data:
+ *   - Depth zone baseline (offshore = clearer by default)
+ *   - Hourly precipitation (rainfall → runoff → inshore turbidity)
+ *   - Wave height × shallow factor (sediment resuspension matters more in shallows)
+ *
+ * Higher score = clearer water.
+ */
+export function calcClarityScore(
+  conditions: MarineConditions | null,
+  depthRangeFt?: [number, number],
+): number {
+  let base = 55;
+  if (depthRangeFt) {
+    const mid = (depthRangeFt[0] + depthRangeFt[1]) / 2;
+    if (mid <= 5) base = 28;
+    else if (mid <= 30) base = 45;
+    else if (mid <= 100) base = 63;
+    else if (mid <= 300) base = 80;
+    else if (mid <= 600) base = 90;
+    else base = 95;
+  }
+
+  if (!conditions) return base;
+
+  const precip = conditions.precipitationMm;
+  const rainPenalty = precip >= 5 ? 32 : precip >= 1 ? 20 : precip >= 0.1 ? 9 : 0;
+
+  // Wave resuspension is strongest in shallow zones
+  const shallowFactor = depthRangeFt
+    ? Math.max(0, 1 - (depthRangeFt[0] + depthRangeFt[1]) / 200)
+    : 0.5;
+  const rawWavePenalty = conditions.waveHeightFt >= 5 ? 28
+    : conditions.waveHeightFt >= 3 ? 18
+    : conditions.waveHeightFt >= 1.5 ? 10
+    : conditions.waveHeightFt >= 0.5 ? 4
+    : 0;
+
+  return Math.max(0, Math.min(100, Math.round(base - rainPenalty - rawWavePenalty * shallowFactor)));
+}
+
+export interface ClarityInfo {
+  label: string;
+  visibilityEst: string;
+  colors: string;
+  tips: string;
+  color: string;
+}
+
+/** Human-readable advice keyed to the current clarity score */
+export function clarityAdvice(score: number): ClarityInfo {
+  if (score >= 75) return {
+    label: 'Clear',
+    visibilityEst: '8–15+ ft',
+    colors: 'Natural baitfish, pearl, silver/chrome, clear/smoke',
+    tips: 'Downsize profiles · 12–17 lb fluorocarbon leader · slow/natural presentation',
+    color: '#22c55e',
+  };
+  if (score >= 50) return {
+    label: 'Good',
+    visibilityEst: '4–8 ft',
+    colors: 'Chartreuse/white, gold, light blue, silver flash',
+    tips: 'Standard setup · add moderate flash/movement',
+    color: '#84cc16',
+  };
+  if (score >= 28) return {
+    label: 'Murky',
+    visibilityEst: '1–4 ft',
+    colors: 'Chartreuse, hot pink, black/purple silhouette, white',
+    tips: 'Upsize profiles · add rattle or vibration · slow down retrieve',
+    color: '#f97316',
+  };
+  return {
+    label: 'Very Murky',
+    visibilityEst: '< 1 ft',
+    colors: 'Bright chartreuse, UV-reactive, high-contrast silhouettes',
+    tips: 'Switch to scented bait or cut bait · sound & vibration are critical',
+    color: '#ef4444',
+  };
+}
+
 export function calcConfidence(forecastHoursAhead: number): number {
   if (forecastHoursAhead <= 0) return 1.0;
   if (forecastHoursAhead <= 24) return 1.0 - (forecastHoursAhead / 24) * 0.15;

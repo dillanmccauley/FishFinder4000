@@ -29,6 +29,12 @@ export interface Species {
   preferredWaterTempF: [number, number];
   /** Typical depth range this species is found in [min, max] feet */
   depthRangeFt: [number, number];
+  /**
+   * How much this species relies on clear water to feed (0–100).
+   * High values = sight hunters badly affected by turbidity.
+   * Low values = ambush/lateral-line predators largely unaffected.
+   */
+  clarityPreference: number;
   topLures: string[];
   topRigs: string[];
   peakTidePhase: 'incoming' | 'outgoing' | 'high' | 'low' | 'any';
@@ -40,6 +46,8 @@ export interface MarineConditions {
   windSpeedMph: number;
   windDirectionDeg: number;
   visibilityMi: number;
+  /** Hourly rainfall from Open-Meteo — primary driver of inshore turbidity */
+  precipitationMm: number;
   timestamp: Date;
 }
 
@@ -61,6 +69,7 @@ export interface ZoneScore {
   moonPhase: number;   // 0–1 raw (0 = new, 0.5 = full)
   moonPhaseName: string;
   moonPhaseEmoji: string;
+  clarityScore: number;  // 0–100 estimated water clarity
   activeSpecies: Species[];
   conditions: MarineConditions | null;
   tide: TideInfo | null;

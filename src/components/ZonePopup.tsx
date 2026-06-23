@@ -1,5 +1,5 @@
 import type { ZoneScore, Hotspot } from '../types';
-import { GRADE_COLORS, GRADE_BG_COLORS, GRADE_LABELS, formatTempF, formatWind } from '../utils/scoring';
+import { GRADE_COLORS, GRADE_BG_COLORS, GRADE_LABELS, formatTempF, formatWind, clarityAdvice } from '../utils/scoring';
 import { classifyDepth, DEPTH_ZONES, speciesMatchDepth } from '../utils/depth';
 import { ConfidenceBadge } from './ConfidenceBadge';
 
@@ -99,23 +99,49 @@ export function ZonePopup({ score, hotspot, onRemove }: Props) {
         <div style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>
           TOP RECOMMENDATIONS
         </div>
-        {score.activeSpecies.slice(0, 2).map(s => (
-          <div key={s.id} className="mb-2">
-            <div style={{ color: '#cbd5e1', fontSize: '12px', fontWeight: 600, marginBottom: 3 }}>
-              {s.commonName}
-            </div>
-            <div className="flex gap-4">
-              <div>
-                <span style={{ color: '#64748b', fontSize: '10px' }}>LURE</span>
-                <div style={{ color: '#e2e8f0', fontSize: '12px' }}>{s.topLures[0]}</div>
+        {score.activeSpecies.slice(0, 2).map(s => {
+          const clarityOk = score.clarityScore >= s.clarityPreference * 0.6;
+          return (
+            <div key={s.id} className="mb-2">
+              <div className="flex items-center gap-2" style={{ marginBottom: 3 }}>
+                <span style={{ color: '#cbd5e1', fontSize: '12px', fontWeight: 600 }}>{s.commonName}</span>
+                {!clarityOk && (
+                  <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#f9741620', border: '1px solid #f9741660', color: '#f97316' }}>
+                    ⚠ low clarity
+                  </span>
+                )}
               </div>
-              <div>
-                <span style={{ color: '#64748b', fontSize: '10px' }}>RIG</span>
-                <div style={{ color: '#e2e8f0', fontSize: '12px' }}>{s.topRigs[0]}</div>
+              <div className="flex gap-4">
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '10px' }}>LURE</span>
+                  <div style={{ color: '#e2e8f0', fontSize: '12px' }}>{s.topLures[0]}</div>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '10px' }}>RIG</span>
+                  <div style={{ color: '#e2e8f0', fontSize: '12px' }}>{s.topRigs[0]}</div>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
+
+        {/* Clarity-based lure colour guide */}
+        {(() => {
+          const ci = clarityAdvice(score.clarityScore);
+          return (
+            <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: `${ci.color}12`, border: `1px solid ${ci.color}40` }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: ci.color, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                💧 {ci.label} water lure guide
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 3 }}>
+                <span style={{ color: '#64748b' }}>Colors: </span>{ci.colors}
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                <span style={{ color: '#64748b' }}>Tips: </span>{ci.tips}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Conditions */}
@@ -131,7 +157,18 @@ export function ZonePopup({ score, hotspot, onRemove }: Props) {
           {score.tide && <CondRow icon="📏" label="Tide Height" value={`${score.tide.heightFt.toFixed(1)} ft`} />}
           {score.tide && <CondRow icon="⏰" label="Next Event" value={score.tide.nextEventLabel} />}
           <CondRow icon={score.moonPhaseEmoji} label="Moon" value={score.moonPhaseName} />
+          <CondRow
+            icon="💧"
+            label="Water Clarity"
+            value={`${clarityAdvice(score.clarityScore).label} (~${clarityAdvice(score.clarityScore).visibilityEst})`}
+            valueColor={clarityAdvice(score.clarityScore).color}
+          />
         </div>
+        {score.conditions && score.conditions.precipitationMm > 0 && (
+          <div style={{ fontSize: 10, color: '#f97316', marginTop: 6 }}>
+            ☔ {score.conditions.precipitationMm.toFixed(1)} mm/hr rainfall — expect reduced clarity inshore
+          </div>
+        )}
       </div>
 
       {/* Water depth */}
@@ -270,11 +307,11 @@ function DepthBar({ min, max, color }: { min: number; max: number; color: string
   );
 }
 
-function CondRow({ icon, label, value }: { icon: string; label: string; value: string }) {
+function CondRow({ icon, label, value, valueColor }: { icon: string; label: string; value: string; valueColor?: string }) {
   return (
     <div>
       <div style={{ color: '#64748b', fontSize: '10px' }}>{icon} {label}</div>
-      <div style={{ color: '#e2e8f0', fontSize: '12px', fontWeight: 500 }}>{value}</div>
+      <div style={{ color: valueColor ?? '#e2e8f0', fontSize: '12px', fontWeight: 500 }}>{value}</div>
     </div>
   );
 }
