@@ -62,8 +62,10 @@ export function FishMap({
   const circleRef = useRef<L.Circle | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const popupRootsRef = useRef<Map<string, ReturnType<typeof createRoot>>>(new Map());
+  const depthLayerRef = useRef<L.TileLayer | null>(null);
   const [legendVisible, setLegendVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [depthLayerVisible, setDepthLayerVisible] = useState(false);
 
   // Combined hotspot map (regular + custom)
   const allHotspotsMap = useMemo(() => {
@@ -101,6 +103,7 @@ export function FishMap({
         try { root.unmount(); } catch (_) {}
       });
       popupRootsRef.current.clear();
+      depthLayerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -125,6 +128,29 @@ export function FishMap({
     if (!containerRef.current) return;
     containerRef.current.style.cursor = isCreating ? 'crosshair' : '';
   }, [isCreating]);
+
+  // ESRI Ocean Reference depth tile overlay
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (depthLayerVisible) {
+      if (!depthLayerRef.current) {
+        depthLayerRef.current = L.tileLayer(
+          'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
+          {
+            attribution: 'Depth data © Esri, GEBCO, NOAA',
+            maxNativeZoom: 13,
+            maxZoom: 19,
+            opacity: 0.8,
+          }
+        );
+      }
+      depthLayerRef.current.addTo(map);
+    } else {
+      depthLayerRef.current?.remove();
+    }
+  }, [depthLayerVisible]);
 
   // Update user location marker and radius circle
   useEffect(() => {
@@ -227,8 +253,9 @@ export function FishMap({
       <Legend visible={legendVisible} onToggle={() => setLegendVisible(v => !v)} />
       <NearMePanel userLocation={userLocation} zoneScores={zoneScores} targetDate={targetDate} />
 
-      {/* Add Zone FAB */}
-      <div style={{ position: 'absolute', top: 56, right: 12, zIndex: 9999 }}>
+      {/* Map control buttons */}
+      <div style={{ position: 'absolute', top: 56, right: 12, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {/* Add Zone FAB */}
         <button
           onClick={() => setIsCreating(v => !v)}
           title={isCreating ? 'Cancel — click map to place zone' : 'Add custom zone'}
@@ -254,7 +281,6 @@ export function FishMap({
         {isCreating && (
           <div
             style={{
-              marginTop: 6,
               padding: '6px 10px',
               borderRadius: 8,
               background: '#0ea5e920',
@@ -269,6 +295,30 @@ export function FishMap({
             Click map to place zone
           </div>
         )}
+
+        {/* Depth chart toggle */}
+        <button
+          onClick={() => setDepthLayerVisible(v => !v)}
+          title={depthLayerVisible ? 'Hide depth chart' : 'Show ocean depth chart'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 14px',
+            borderRadius: 10,
+            background: depthLayerVisible ? '#6366f1' : '#1e293bef',
+            border: `1px solid ${depthLayerVisible ? '#a5b4fc' : '#6366f1'}`,
+            color: depthLayerVisible ? '#fff' : '#a5b4fc',
+            cursor: 'pointer',
+            fontSize: 12,
+            fontWeight: 700,
+            boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
+            backdropFilter: 'blur(8px)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          🌊 {depthLayerVisible ? 'Hide Depth' : 'Depth Chart'}
+        </button>
       </div>
 
       {/* Data attribution */}

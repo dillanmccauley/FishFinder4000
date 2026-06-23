@@ -22,6 +22,8 @@ export function CreateZoneModal({ location, onConfirm, onCancel }: Props) {
   const [type, setType] = useState<NewZoneParams['type']>('pier');
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
+  const [depthMin, setDepthMin] = useState('');
+  const [depthMax, setDepthMax] = useState('');
 
   function toggle(id: string) {
     setSelectedSpecies(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
@@ -30,7 +32,12 @@ export function CreateZoneModal({ location, onConfirm, onCancel }: Props) {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || !selectedSpecies.length) return;
-    onConfirm({ location, name: name.trim(), type, activeSpeciesIds: selectedSpecies, notes: notes.trim() });
+    const dMin = parseInt(depthMin, 10);
+    const dMax = parseInt(depthMax, 10);
+    const depthRangeFt = (!isNaN(dMin) && !isNaN(dMax) && dMax >= dMin)
+      ? [dMin, dMax] as [number, number]
+      : undefined;
+    onConfirm({ location, name: name.trim(), type, activeSpeciesIds: selectedSpecies, notes: notes.trim(), depthRangeFt });
   }
 
   const canSubmit = name.trim().length > 0 && selectedSpecies.length > 0;
@@ -118,6 +125,34 @@ export function CreateZoneModal({ location, onConfirm, onCancel }: Props) {
                   </button>
                 );
               })}
+            </div>
+          </Field>
+
+          {/* Depth */}
+          <Field label="Water Depth (optional)">
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="number"
+                min={0}
+                max={2000}
+                placeholder="Min ft"
+                value={depthMin}
+                onChange={e => setDepthMin(e.target.value)}
+                style={{ ...inputStyle, width: '50%' }}
+              />
+              <span style={{ color: '#475569', fontSize: 12, flexShrink: 0 }}>to</span>
+              <input
+                type="number"
+                min={0}
+                max={2000}
+                placeholder="Max ft"
+                value={depthMax}
+                onChange={e => setDepthMax(e.target.value)}
+                style={{ ...inputStyle, width: '50%' }}
+              />
+            </div>
+            <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>
+              Typical fishing depth at this spot — used for species suggestions
             </div>
           </Field>
 

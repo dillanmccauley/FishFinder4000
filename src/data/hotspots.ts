@@ -10,6 +10,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8721604',
     activeSpeciesIds: ['red-drum', 'snook', 'spotted-seatrout', 'flounder', 'tarpon'],
     notes: 'Legendary inlet for snook & drum on outgoing tides',
+    depthRangeFt: [5, 30],
   },
   {
     id: 'ponce-inlet',
@@ -19,6 +20,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8721604',
     activeSpeciesIds: ['snook', 'red-drum', 'flounder', 'sheepshead', 'spanish-mackerel'],
     notes: 'Active inlet with strong currents and structure',
+    depthRangeFt: [8, 35],
   },
   {
     id: 'mosquito-lagoon',
@@ -28,6 +30,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8721604',
     activeSpeciesIds: ['red-drum', 'spotted-seatrout', 'black-drum', 'flounder'],
     notes: 'World-class sight fishing on shallow grass flats',
+    depthRangeFt: [1, 6],
   },
   {
     id: 'flagler-beach-pier',
@@ -37,6 +40,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8720245',
     activeSpeciesIds: ['spanish-mackerel', 'sheepshead', 'flounder', 'black-drum'],
     notes: 'Historic 800-ft wooden pier',
+    depthRangeFt: [8, 22],
   },
   {
     id: 'matanzas-inlet',
@@ -46,6 +50,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8720245',
     activeSpeciesIds: ['red-drum', 'spotted-seatrout', 'snook', 'flounder', 'sheepshead'],
     notes: 'Pristine inlet, minimal development, excellent structure',
+    depthRangeFt: [4, 20],
   },
   {
     id: 'st-augustine-inlet',
@@ -55,6 +60,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8720245',
     activeSpeciesIds: ['red-drum', 'black-drum', 'sheepshead', 'flounder', 'tarpon'],
     notes: 'Deep-water inlet with strong tidal flow',
+    depthRangeFt: [12, 45],
   },
   // Georgia
   {
@@ -65,6 +71,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8670870',
     activeSpeciesIds: ['spanish-mackerel', 'red-drum', 'spotted-seatrout', 'flounder', 'sheepshead'],
     notes: '700-ft public pier at mouth of Savannah River',
+    depthRangeFt: [8, 28],
   },
   {
     id: 'st-simons-sound',
@@ -74,6 +81,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8679598',
     activeSpeciesIds: ['red-drum', 'spotted-seatrout', 'flounder', 'sheepshead', 'black-drum'],
     notes: 'Productive sound with oyster bars and grass beds',
+    depthRangeFt: [4, 25],
   },
   {
     id: 'cumberland-island-flats',
@@ -83,6 +91,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8720011',
     activeSpeciesIds: ['red-drum', 'spotted-seatrout', 'black-drum', 'flounder'],
     notes: 'Remote wilderness flats, pristine marshes',
+    depthRangeFt: [1, 8],
   },
   // South Carolina
   {
@@ -93,6 +102,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8661070',
     activeSpeciesIds: ['red-drum', 'spotted-seatrout', 'flounder', 'sheepshead', 'black-drum'],
     notes: 'Seafood capital of SC, excellent marsh fishing',
+    depthRangeFt: [4, 18],
   },
   {
     id: 'apache-pier',
@@ -102,6 +112,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8661070',
     activeSpeciesIds: ['spanish-mackerel', 'flounder', 'sheepshead', 'black-drum'],
     notes: 'One of the longest piers in the US at 1,206 ft',
+    depthRangeFt: [12, 38],
   },
   {
     id: 'folly-beach-pier',
@@ -111,6 +122,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8665530',
     activeSpeciesIds: ['spanish-mackerel', 'sheepshead', 'flounder', 'red-drum'],
     notes: 'Active Charleston-area pier with regular Spanish Mackerel runs',
+    depthRangeFt: [10, 28],
   },
   {
     id: 'port-royal-sound',
@@ -120,6 +132,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8657163',
     activeSpeciesIds: ['red-drum', 'spotted-seatrout', 'flounder', 'black-drum', 'sheepshead'],
     notes: 'Large sound with diverse marsh habitat',
+    depthRangeFt: [4, 25],
   },
   // North Carolina
   {
@@ -130,6 +143,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8658163',
     activeSpeciesIds: ['red-drum', 'spotted-seatrout', 'flounder', 'spanish-mackerel', 'tarpon'],
     notes: 'Dynamic cape inlet, productive year-round',
+    depthRangeFt: [10, 50],
   },
   {
     id: 'carolina-beach-pier',
@@ -139,6 +153,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8658163',
     activeSpeciesIds: ['spanish-mackerel', 'flounder', 'sheepshead', 'red-drum'],
     notes: 'Popular 700-ft Wilmington-area pier',
+    depthRangeFt: [10, 28],
   },
   {
     id: 'beaufort-inlet',
@@ -148,6 +163,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8656483',
     activeSpeciesIds: ['red-drum', 'spotted-seatrout', 'flounder', 'black-drum', 'sheepshead'],
     notes: 'Crystal Coast inlet with strong structure fishing',
+    depthRangeFt: [10, 42],
   },
   // Florida West Coast / Charlotte Harbor
   {
@@ -158,6 +174,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8725110',
     activeSpeciesIds: ['snook', 'red-drum', 'spotted-seatrout', 'tarpon', 'flounder'],
     notes: 'Premier SW Florida estuary, snook & tarpon hotspot',
+    depthRangeFt: [3, 12],
   },
   {
     id: 'boca-grande-pass',
@@ -167,6 +184,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8725110',
     activeSpeciesIds: ['tarpon', 'snook', 'red-drum', 'spanish-mackerel'],
     notes: 'World-famous tarpon fishing pass, May–July peak',
+    depthRangeFt: [15, 80],
   },
   {
     id: 'naples-pier',
@@ -176,6 +194,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8725520',
     activeSpeciesIds: ['snook', 'spanish-mackerel', 'sheepshead', 'black-drum', 'tarpon'],
     notes: 'Historic 1,000-ft pier, great for sunsets & snook',
+    depthRangeFt: [8, 22],
   },
   // Indian River Lagoon
   {
@@ -186,6 +205,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8721604',
     activeSpeciesIds: ['red-drum', 'spotted-seatrout', 'snook', 'black-drum', 'flounder'],
     notes: 'Biodiversity hotspot, year-round sight fishing',
+    depthRangeFt: [2, 8],
   },
   // South Florida
   {
@@ -196,6 +216,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8723214',
     activeSpeciesIds: ['snook', 'tarpon', 'spanish-mackerel', 'flounder', 'black-drum'],
     notes: 'High-traffic Miami-area inlet, great for snook on outgoing tides',
+    depthRangeFt: [10, 30],
   },
   {
     id: 'lake-worth-inlet',
@@ -205,6 +226,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8722669',
     activeSpeciesIds: ['snook', 'tarpon', 'spanish-mackerel', 'red-drum', 'flounder'],
     notes: 'Palm Beach inlet with year-round snook and seasonal tarpon runs',
+    depthRangeFt: [12, 40],
   },
   // Virginia
   {
@@ -215,6 +237,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8638610',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'flounder', 'black-sea-bass', 'sheepshead'],
     notes: 'Artificial reef structure under CBBT spans draws huge variety of species',
+    depthRangeFt: [25, 80],
   },
   {
     id: 'virginia-beach-pier',
@@ -224,6 +247,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8638610',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'flounder', 'spanish-mackerel', 'black-sea-bass'],
     notes: 'Oceanfront pier, excellent for stripers and blues spring through fall',
+    depthRangeFt: [10, 30],
   },
   {
     id: 'lynnhaven-inlet',
@@ -233,6 +257,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8638610',
     activeSpeciesIds: ['striped-bass', 'flounder', 'spotted-seatrout', 'red-drum', 'weakfish'],
     notes: 'Protected inlet with extensive grass beds and oyster structure',
+    depthRangeFt: [4, 18],
   },
   // Maryland
   {
@@ -243,6 +268,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8571892',
     activeSpeciesIds: ['striped-bass', 'spotted-seatrout', 'flounder', 'bluefish', 'weakfish'],
     notes: 'Central Bay hot zone for trophy stripers on the eastern shore',
+    depthRangeFt: [6, 30],
   },
   {
     id: 'ocean-city-md-pier',
@@ -252,6 +278,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8570280',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'flounder', 'black-sea-bass', 'spanish-mackerel'],
     notes: 'Popular MD oceanfront pier, bluefish blitzes in fall',
+    depthRangeFt: [10, 28],
   },
   // Delaware
   {
@@ -262,6 +289,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8557380',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'flounder', 'weakfish', 'black-sea-bass'],
     notes: 'Premier Delaware inlet, strong tidal flow creates excellent structure fishing',
+    depthRangeFt: [8, 38],
   },
   // New Jersey
   {
@@ -272,6 +300,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8534720',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'flounder', 'weakfish', 'tautog'],
     notes: 'Legendary NJ inlet, spring and fall striper runs are world-class',
+    depthRangeFt: [8, 40],
   },
   {
     id: 'sandy-hook',
@@ -281,6 +310,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8531680',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'flounder', 'black-sea-bass', 'tautog'],
     notes: 'Gateway to NY Bight, abundant structure, striper and tautog all season',
+    depthRangeFt: [15, 55],
   },
   {
     id: 'cape-may-nj',
@@ -290,6 +320,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8536110',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'weakfish', 'flounder', 'black-sea-bass'],
     notes: 'Strong tidal rips at the tip of NJ create outstanding bluefish action',
+    depthRangeFt: [18, 75],
   },
   // New York
   {
@@ -300,6 +331,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8510560',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'black-sea-bass', 'tautog', 'flounder'],
     notes: 'The Mecca for striper fishing, legendary fall blitz runs from September',
+    depthRangeFt: [20, 100],
   },
   {
     id: 'fire-island-inlet',
@@ -309,6 +341,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8516945',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'flounder', 'weakfish'],
     notes: 'South shore inlet, productive for weakfish at night and bluefish by day',
+    depthRangeFt: [8, 38],
   },
   // Connecticut
   {
@@ -319,6 +352,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8461490',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'tautog', 'flounder', 'black-sea-bass'],
     notes: 'Protected CT bay with strong tidal exchange and rocky structure',
+    depthRangeFt: [8, 35],
   },
   // Rhode Island
   {
@@ -329,6 +363,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8452660',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'tautog', 'flounder', 'black-sea-bass'],
     notes: 'Deep bay with excellent structure, tautog on rocky ledges in spring/fall',
+    depthRangeFt: [12, 55],
   },
   {
     id: 'block-island-sound',
@@ -338,6 +373,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8452660',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'black-sea-bass', 'tautog'],
     notes: 'Open water rips and ledges hold trophy stripers all season',
+    depthRangeFt: [30, 120],
   },
   // Massachusetts
   {
@@ -348,6 +384,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8447270',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'tautog', 'black-sea-bass', 'flounder'],
     notes: 'Ripping current creates perfect ambush for stripers on incoming tide',
+    depthRangeFt: [15, 32],
   },
   {
     id: 'buzzards-bay',
@@ -357,6 +394,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8447270',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'flounder', 'black-sea-bass', 'tautog'],
     notes: 'Shallow, warm bay warms early, extends the season for stripers and blues',
+    depthRangeFt: [10, 40],
   },
   // Maine
   {
@@ -367,6 +405,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8418150',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'tautog', 'black-sea-bass', 'flounder'],
     notes: 'Maine\'s largest harbor, consistent striper action from June through September',
+    depthRangeFt: [20, 55],
   },
   {
     id: 'kennebec-river-me',
@@ -376,6 +415,7 @@ export const HOTSPOTS: Hotspot[] = [
     tideStationId: '8418150',
     activeSpeciesIds: ['striped-bass', 'bluefish', 'flounder'],
     notes: 'Major tidal river with exceptional striped bass runs early and late season',
+    depthRangeFt: [10, 40],
   },
 ];
 

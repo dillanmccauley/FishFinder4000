@@ -16,6 +16,8 @@ export interface Hotspot {
   tideStationId: string;
   activeSpeciesIds: string[];
   notes: string;
+  /** Typical fishing depth range at this spot [min, max] feet */
+  depthRangeFt?: [number, number];
 }
 
 export interface Species {
@@ -25,6 +27,8 @@ export interface Species {
   /** Monthly availability 0–100, Jan–Dec */
   monthlyAvailability: number[];
   preferredWaterTempF: [number, number];
+  /** Typical depth range this species is found in [min, max] feet */
+  depthRangeFt: [number, number];
   topLures: string[];
   topRigs: string[];
   peakTidePhase: 'incoming' | 'outgoing' | 'high' | 'low' | 'any';

@@ -1,5 +1,6 @@
 import type { ZoneScore, Hotspot } from '../types';
 import { GRADE_COLORS, GRADE_BG_COLORS, GRADE_LABELS, formatTempF, formatWind } from '../utils/scoring';
+import { classifyDepth, DEPTH_ZONES, speciesMatchDepth } from '../utils/depth';
 import { ConfidenceBadge } from './ConfidenceBadge';
 
 const TYPE_ICONS: Record<string, string> = {
@@ -133,6 +134,57 @@ export function ZonePopup({ score, hotspot, onRemove }: Props) {
         </div>
       </div>
 
+      {/* Water depth */}
+      {hotspot.depthRangeFt && (() => {
+        const [dMin, dMax] = hotspot.depthRangeFt;
+        const zone = classifyDepth(dMin, dMax);
+        const zoneInfo = DEPTH_ZONES[zone];
+        return (
+          <div className="px-4 py-3" style={{ borderBottom: '1px solid #334155' }}>
+            <div style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>
+              WATER DEPTH
+            </div>
+
+            <div className="flex items-center gap-2 mb-2">
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                background: `${zoneInfo.color}22`, border: `1px solid ${zoneInfo.color}88`, color: zoneInfo.color,
+              }}>
+                {zoneInfo.icon} {zoneInfo.label}
+              </span>
+              <span style={{ color: '#94a3b8', fontSize: 11 }}>{dMin}–{dMax} ft</span>
+            </div>
+
+            <div style={{ color: '#64748b', fontSize: 11, marginBottom: 8 }}>{zoneInfo.description}</div>
+
+            <DepthBar min={dMin} max={dMax} color={zoneInfo.color} />
+
+            <div style={{ fontSize: 10, color: '#64748b', marginTop: 8, marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Species matched to this depth
+            </div>
+            <div className="flex flex-wrap gap-1 mb-2">
+              {score.activeSpecies.map(sp => {
+                const match = speciesMatchDepth(sp, dMin, dMax);
+                return (
+                  <span key={sp.id} style={{
+                    fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                    background: match ? '#22c55e18' : '#64748b18',
+                    border: `1px solid ${match ? '#22c55e55' : '#64748b40'}`,
+                    color: match ? '#4ade80' : '#64748b',
+                  }}>
+                    {match ? '✓' : '~'} {sp.commonName}
+                  </span>
+                );
+              })}
+            </div>
+
+            <div style={{ fontSize: 10, color: '#475569', fontStyle: 'italic' }}>
+              Also common here: {zoneInfo.typicalFish}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Resources & links */}
       <div className="px-4 py-3" style={{ borderBottom: onRemove ? '1px solid #334155' : undefined }}>
         <div style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>
@@ -183,6 +235,36 @@ function ScoreBar({ label, value, weight, color }: { label: string; value: numbe
             transition: 'width 0.3s ease',
           }}
         />
+      </div>
+    </div>
+  );
+}
+
+function DepthBar({ min, max, color }: { min: number; max: number; color: string }) {
+  // Scale 0–300 ft covers intertidal through inner shelf
+  const SCALE = 300;
+  const leftPct = Math.min(98, (min / SCALE) * 100);
+  const widthPct = Math.min(98 - leftPct, Math.max(4, ((max - min) / SCALE) * 100));
+  return (
+    <div>
+      <div style={{ height: 8, background: '#1e293b', borderRadius: 4, position: 'relative', overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(to right, #86efac 0%, #34d399 10%, #22d3ee 30%, #60a5fa 60%, #818cf8 85%, #a78bfa 100%)',
+          opacity: 0.25,
+        }} />
+        <div style={{
+          position: 'absolute',
+          left: `${leftPct}%`,
+          width: `${widthPct}%`,
+          height: '100%',
+          background: color,
+          borderRadius: 3,
+          opacity: 0.85,
+        }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#334155', marginTop: 2 }}>
+        <span>0</span><span>50 ft</span><span>100 ft</span><span>200 ft</span><span>300+ ft</span>
       </div>
     </div>
   );

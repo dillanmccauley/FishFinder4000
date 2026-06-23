@@ -35,6 +35,7 @@ export interface NewZoneParams {
   type: Hotspot['type'];
   activeSpeciesIds: string[];
   notes: string;
+  depthRangeFt?: [number, number];
 }
 
 export function useCustomZones() {
@@ -49,6 +50,7 @@ export function useCustomZones() {
       tideStationId: nearestTideStation(params.location),
       activeSpeciesIds: params.activeSpeciesIds,
       notes: params.notes,
+      depthRangeFt: params.depthRangeFt,
     };
     const next = [...customZones, zone];
     setCustomZones(next);
