@@ -1,21 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { LatLng, ZoneScore } from '../types';
 import { HOTSPOTS, HOTSPOT_MAP } from '../data/hotspots';
+import { SPECIES } from '../data/species';
 import { GRADE_COLORS, scoreToGrade, calcSeasonScore } from '../utils/scoring';
+import { distanceMi } from '../utils/geo';
 
 const RADIUS_MI = 25;
-const EARTH_RADIUS_MI = 3958.8;
-
-function distanceMi(a: LatLng, b: LatLng): number {
-  const dLat = (b.lat - a.lat) * Math.PI / 180;
-  const dLng = (b.lng - a.lng) * Math.PI / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(a.lat * Math.PI / 180) *
-    Math.cos(b.lat * Math.PI / 180) *
-    Math.sin(dLng / 2) ** 2;
-  return EARTH_RADIUS_MI * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
 
 interface Props {
   userLocation: LatLng;
@@ -24,6 +14,15 @@ interface Props {
 }
 
 export function NearMePanel({ userLocation, zoneScores, targetDate }: Props) {
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [selectedSpeciesIds, setSelectedSpeciesIds] = useState<string[]>([]);
+
+  const toggleSpecies = (id: string) => {
+    setSelectedSpeciesIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
   const result = useMemo(() => {
     const nearby = HOTSPOTS.filter(h => distanceMi(userLocation, h.location) <= RADIUS_MI);
     if (!nearby.length) return null;
@@ -36,7 +35,6 @@ export function NearMePanel({ userLocation, zoneScores, targetDate }: Props) {
 
     const areaScore = scores.reduce((s, z) => s + z.total, 0) / scores.length;
     const areaGrade = scoreToGrade(areaScore);
-    const bestZone = scores.reduce((b, z) => (z.total > b.total ? z : b), scores[0]);
 
     // Per-species season heat averaged across nearby zones
     const acc = new Map<string, { commonName: string; totalHeat: number; count: number }>();
@@ -55,12 +53,19 @@ export function NearMePanel({ userLocation, zoneScores, targetDate }: Props) {
       .sort((a, b) => b.heat - a.heat)
       .slice(0, 4);
 
-    return { nearbyCount: nearby.length, areaGrade, bestZone, topSpecies };
-  }, [userLocation, zoneScores, targetDate]);
+    // Sort scores: matching filter first, non-matching dimmed at bottom
+    const sortedScores = selectedSpeciesIds.length === 0 ? scores : [
+      ...scores.filter(z => z.activeSpecies.some(sp => selectedSpeciesIds.includes(sp.id))),
+      ...scores.filter(z => !z.activeSpecies.some(sp => selectedSpeciesIds.includes(sp.id))),
+    ];
+
+    return { nearbyCount: nearby.length, areaGrade, topSpecies, sortedScores };
+  }, [userLocation, zoneScores, targetDate, selectedSpeciesIds]);
 
   if (!result) return null;
 
-  const { nearbyCount, areaGrade, bestZone, topSpecies } = result;
+  const { nearbyCount, areaGrade, topSpecies, sortedScores } = result;
+  const bestZone = sortedScores[0];
   const color = GRADE_COLORS[areaGrade];
 
   return (
@@ -84,19 +89,76 @@ export function NearMePanel({ userLocation, zoneScores, targetDate }: Props) {
               {nearbyCount} zone{nearbyCount !== 1 ? 's' : ''}
             </span>
           </div>
-          <div
-            className="flex items-center justify-center font-mono font-bold"
-            style={{
-              width: 26, height: 26, borderRadius: '50%',
-              background: `${color}22`,
-              border: `2px solid ${color}`,
-              color,
-              fontSize: 13,
-            }}
-          >
-            {areaGrade}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setFilterOpen(o => !o)}
+              style={{
+                background: filterOpen ? '#0ea5e920' : 'transparent',
+                border: `1px solid ${filterOpen ? '#0ea5e9' : '#334155'}`,
+                borderRadius: 4,
+                color: filterOpen ? '#0ea5e9' : '#64748b',
+                fontSize: 10,
+                padding: '2px 6px',
+                cursor: 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              🎯 Filter
+            </button>
+            <div
+              className="flex items-center justify-center font-mono font-bold"
+              style={{
+                width: 26, height: 26, borderRadius: '50%',
+                background: `${color}22`,
+                border: `2px solid ${color}`,
+                color,
+                fontSize: 13,
+              }}
+            >
+              {areaGrade}
+            </div>
           </div>
         </div>
+
+        {/* Species filter */}
+        {filterOpen && (
+          <div className="px-3 py-2" style={{ borderBottom: '1px solid #1e293b' }}>
+            <div style={{ fontSize: 9, color: '#475569', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Filter by species
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {SPECIES.map(sp => {
+                const active = selectedSpeciesIds.includes(sp.id);
+                return (
+                  <button
+                    key={sp.id}
+                    onClick={() => toggleSpecies(sp.id)}
+                    style={{
+                      fontSize: 10,
+                      padding: '2px 6px',
+                      borderRadius: 99,
+                      border: `1px solid ${active ? '#0ea5e9' : '#334155'}`,
+                      background: active ? '#0ea5e918' : 'transparent',
+                      color: active ? '#0ea5e9' : '#64748b',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {sp.commonName.split(' ')[0]}
+                  </button>
+                );
+              })}
+            </div>
+            {selectedSpeciesIds.length > 0 && (
+              <button
+                onClick={() => setSelectedSpeciesIds([])}
+                style={{ fontSize: 9, color: '#475569', marginTop: 4, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                Clear filter
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Species season heat */}
         <div className="px-3 py-2">

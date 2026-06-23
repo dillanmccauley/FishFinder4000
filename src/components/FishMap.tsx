@@ -2,13 +2,16 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import { createRoot } from 'react-dom/client';
-import type { LatLng, ZoneScore, Hotspot } from '../types';
+import type { LatLng, ZoneScore, Hotspot, MarineConditions, TideInfo } from '../types';
 import { HOTSPOTS } from '../data/hotspots';
-import { GRADE_COLORS } from '../utils/scoring';
+import { GRADE_COLORS, GRADE_LABELS } from '../utils/scoring';
+import { FishingHeatLayer } from '../utils/fishingHeatLayer';
 import { ZonePopup } from './ZonePopup';
 import { SearchBar } from './SearchBar';
 import { Legend } from './Legend';
 import { NearMePanel } from './NearMePanel';
+import { SpotForecastPanel } from './SpotForecastPanel';
+import { useLocationForecast } from '../hooks/useLocationForecast';
 
 const RADIUS_MILES = 25;
 const METERS_PER_MILE = 1609.34;
@@ -40,6 +43,9 @@ interface Props {
   zoneScores: Map<string, ZoneScore>;
   customZones: Hotspot[];
   targetDate: Date;
+  nowDate: Date;
+  getConditionsAt: (location: LatLng, date: Date) => MarineConditions | null;
+  getTideAt: (stationId: string, date: Date) => TideInfo | null;
   onLocationChange: (location: LatLng, label: string) => void;
   onRequestCreateZone: (loc: LatLng) => void;
   onRemoveCustomZone: (id: string) => void;
@@ -51,6 +57,9 @@ export function FishMap({
   zoneScores,
   customZones,
   targetDate,
+  nowDate,
+  getConditionsAt,
+  getTideAt,
   onLocationChange,
   onRequestCreateZone,
   onRemoveCustomZone,
@@ -63,9 +72,20 @@ export function FishMap({
   const userMarkerRef = useRef<L.Marker | null>(null);
   const popupRootsRef = useRef<Map<string, ReturnType<typeof createRoot>>>(new Map());
   const depthLayerRef = useRef<L.TileLayer | null>(null);
+  const heatLayerRef = useRef<FishingHeatLayer | null>(null);
+  const pinMarkerRef = useRef<L.Marker | null>(null);
   const [legendVisible, setLegendVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [depthLayerVisible, setDepthLayerVisible] = useState(false);
+  const [heatVisible, setHeatVisible] = useState(false);
+  const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
+
+  const { hourlyScores } = useLocationForecast({
+    pin: pinLocation,
+    getConditionsAt,
+    getTideAt,
+    nowDate,
+  });
 
   // Combined hotspot map (regular + custom)
   const allHotspotsMap = useMemo(() => {
@@ -108,15 +128,19 @@ export function FishMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Map click handler for zone creation mode
+  // Map click handler: zone creation mode OR pin drop
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     const handler = (e: L.LeafletMouseEvent) => {
-      if (!isCreating) return;
-      onRequestCreateZone({ lat: e.latlng.lat, lng: e.latlng.lng });
-      setIsCreating(false);
+      const loc = { lat: e.latlng.lat, lng: e.latlng.lng };
+      if (isCreating) {
+        onRequestCreateZone(loc);
+        setIsCreating(false);
+      } else {
+        setPinLocation(loc);
+      }
     };
 
     map.on('click', handler);
@@ -151,6 +175,46 @@ export function FishMap({
       depthLayerRef.current?.remove();
     }
   }, [depthLayerVisible]);
+
+  // Fishing heatmap layer
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (heatVisible) {
+      if (!heatLayerRef.current) {
+        heatLayerRef.current = new FishingHeatLayer();
+        heatLayerRef.current.addTo(map);
+      }
+      const pts = [...allHotspotsMap.values()].map(h => {
+        const s = zoneScores.get(h.id);
+        return s ? { lat: h.location.lat, lng: h.location.lng, score: s.total } : null;
+      }).filter((p): p is { lat: number; lng: number; score: number } => p !== null);
+      heatLayerRef.current.updatePoints(pts);
+    } else {
+      heatLayerRef.current?.remove();
+      heatLayerRef.current = null;
+    }
+  }, [heatVisible, zoneScores, allHotspotsMap]);
+
+  // Pin marker
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    pinMarkerRef.current?.remove();
+    pinMarkerRef.current = null;
+
+    if (!pinLocation) return;
+
+    const pinIcon = L.divIcon({
+      className: '',
+      html: `<div style="width:14px;height:14px;border-radius:50%;background:#f59e0b;border:3px solid #fef3c7;box-shadow:0 0 12px rgba(245,158,11,0.7)"></div>`,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+    pinMarkerRef.current = L.marker([pinLocation.lat, pinLocation.lng], { icon: pinIcon }).addTo(map);
+  }, [pinLocation]);
 
   // Update user location marker and radius circle
   useEffect(() => {
@@ -253,6 +317,16 @@ export function FishMap({
       <Legend visible={legendVisible} onToggle={() => setLegendVisible(v => !v)} />
       <NearMePanel userLocation={userLocation} zoneScores={zoneScores} targetDate={targetDate} />
 
+      {/* Spot forecast panel */}
+      {pinLocation && (
+        <SpotForecastPanel
+          pin={pinLocation}
+          hourlyScores={hourlyScores}
+          targetDate={targetDate}
+          onClose={() => setPinLocation(null)}
+        />
+      )}
+
       {/* Map control buttons */}
       <div style={{ position: 'absolute', top: 56, right: 12, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {/* Add Zone FAB */}
@@ -296,6 +370,30 @@ export function FishMap({
           </div>
         )}
 
+        {/* Heat map toggle */}
+        <button
+          onClick={() => setHeatVisible(v => !v)}
+          title={heatVisible ? 'Hide fishing heatmap' : 'Show fishing grade heatmap'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 14px',
+            borderRadius: 10,
+            background: heatVisible ? '#16a34a' : '#1e293bef',
+            border: `1px solid ${heatVisible ? '#4ade80' : '#16a34a'}`,
+            color: heatVisible ? '#fff' : '#4ade80',
+            cursor: 'pointer',
+            fontSize: 12,
+            fontWeight: 700,
+            boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
+            backdropFilter: 'blur(8px)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          🎣 {heatVisible ? 'Hide Heat' : 'Heat Map'}
+        </button>
+
         {/* Depth chart toggle */}
         <button
           onClick={() => setDepthLayerVisible(v => !v)}
@@ -320,6 +418,25 @@ export function FishMap({
           🌊 {depthLayerVisible ? 'Hide Depth' : 'Depth Chart'}
         </button>
       </div>
+
+      {/* Heatmap legend */}
+      {heatVisible && (
+        <div style={{
+          position: 'absolute', bottom: 104, right: 12, zIndex: 9999,
+          background: '#0f172aee', border: '1px solid #1e293b',
+          borderRadius: 8, padding: '8px 10px', backdropFilter: 'blur(8px)',
+        }}>
+          <div style={{ fontSize: 9, color: '#475569', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Fishing Quality
+          </div>
+          {(['A', 'B', 'C', 'D', 'E', 'F'] as const).map(g => (
+            <div key={g} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+              <div style={{ width: 12, height: 12, borderRadius: 2, background: GRADE_COLORS[g], flexShrink: 0 }} />
+              <span style={{ fontSize: 10, color: '#94a3b8' }}>{g} — {GRADE_LABELS[g]}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Data attribution */}
       <div

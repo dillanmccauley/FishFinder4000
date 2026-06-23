@@ -1,4 +1,4 @@
-import type { Grade, MarineConditions, TideInfo, Species } from '../types';
+import type { Grade, MarineConditions, TideInfo, Species, HourlyScore } from '../types';
 
 export function scoreToGrade(score: number): Grade {
   if (score >= 88) return 'A';
@@ -148,18 +148,95 @@ export function calcMoonScore(date: Date): {
   return { score, phase, phaseName, phaseEmoji };
 }
 
-/** Weighted composite from four fully-real data sources */
+/**
+ * Barometric pressure score (0–100).
+ * Absolute pressure level and 3h trend are both strong fishing predictors.
+ */
+export function calcPressureScore(
+  conditions: MarineConditions | null,
+  prevConditions?: MarineConditions | null,
+): number {
+  if (!conditions) return 70;
+  const delta = prevConditions != null ? conditions.pressureHpa - prevConditions.pressureHpa : 0;
+  const abs = conditions.pressureHpa;
+
+  let base: number;
+  if (abs >= 1015) {
+    base = 85;
+  } else if (abs >= 1010) {
+    base = 78;
+  } else if (abs >= 1005) {
+    base = 65;
+  } else if (abs >= 995) {
+    base = 50;
+  } else {
+    base = 30;
+  }
+
+  let trendBonus: number;
+  if (delta > 3) {
+    trendBonus = 10;       // rapid rise — fish become very active
+  } else if (delta > 1) {
+    trendBonus = 5;        // rising — good activity
+  } else if (delta >= -1) {
+    trendBonus = 0;        // stable
+  } else if (delta >= -3) {
+    trendBonus = -8;       // pre-frontal fall — brief feeding frenzy then shut off
+  } else if (delta >= -5) {
+    trendBonus = -25;      // rapid fall — bite shuts down
+  } else {
+    trendBonus = -40;      // severe drop — fish go deep, near-zero bite
+  }
+
+  const penalty = abs < 995 ? 20 : 0;
+  return Math.max(10, Math.min(100, base + trendBonus - penalty));
+}
+
+/**
+ * UV index score (0–100).
+ * High UV drives sight-hunting species deeper, reducing surface feed activity.
+ * Weighted by species clarity preference — bottom feeders are largely unaffected.
+ */
+export function calcUVScore(conditions: MarineConditions | null, species: Species[]): number {
+  if (!conditions) return 70;
+  const uv = conditions.uvIndex;
+  const baseUVScore = uv <= 2 ? 95 : uv <= 5 ? 80 : uv <= 8 ? 60 : 35;
+  if (!species.length) return baseUVScore;
+  const avgClarity = species.reduce((s, sp) => s + sp.clarityPreference, 0) / species.length;
+  const sensitivity = avgClarity / 100;
+  return Math.round(baseUVScore * (1 - sensitivity * 0.4) + 70 * sensitivity * 0.4);
+}
+
+/**
+ * Seasonal bait availability score (0–100).
+ * Proxy model based on well-documented NE/SE US bait migration patterns.
+ * Embedded as a bonus in calcSeasonScore.
+ */
+export function calcBaitScore(targetDate: Date, isNortheast: boolean): number {
+  const month = targetDate.getMonth();
+  const ne = [20, 20, 75, 75, 75, 85, 85, 85, 95, 95, 60, 25];
+  const se = [25, 25, 70, 70, 70, 80, 80, 80, 95, 95, 65, 30];
+  return isNortheast ? ne[month] : se[month];
+}
+
+/** Weighted composite from seven data sources */
 export function calcZoneScore(params: {
   marineScore: number;
+  pressureScore: number;
   seasonScore: number;
   tideScore: number;
   moonScore: number;
+  uvScore: number;
+  clarityScore: number;
 }): number {
   const raw =
-    params.marineScore * 0.40 +
-    params.seasonScore * 0.35 +
-    params.tideScore  * 0.15 +
-    params.moonScore  * 0.10;
+    params.marineScore   * 0.28 +
+    params.pressureScore * 0.12 +
+    params.seasonScore   * 0.25 +
+    params.tideScore     * 0.15 +
+    params.moonScore     * 0.08 +
+    params.uvScore       * 0.07 +
+    params.clarityScore  * 0.05;
   return Math.max(0, Math.min(100, raw));
 }
 
@@ -306,4 +383,35 @@ export function formatTempF(f: number): string {
 
 export function formatWind(mph: number, deg: number): string {
   return `${mph.toFixed(0)} mph ${windDirection(deg)}`;
+}
+
+export interface BestWindow {
+  startTime: Date;
+  endTime: Date;
+  avgScore: number;
+  grade: Grade;
+}
+
+/** Sliding-window search for the best consecutive `windowHours` within the next 48h of scores */
+export function findBestWindow(scores: HourlyScore[], windowHours = 3): BestWindow | null {
+  const now = new Date();
+  const future = scores.filter(s => s.time >= now && s.time <= new Date(now.getTime() + 48 * 3600000));
+  if (future.length < windowHours) return null;
+
+  let bestAvg = -1;
+  let bestStart = 0;
+
+  for (let i = 0; i <= future.length - windowHours; i++) {
+    const window = future.slice(i, i + windowHours);
+    const avg = window.reduce((sum, s) => sum + s.total, 0) / windowHours;
+    if (avg > bestAvg) { bestAvg = avg; bestStart = i; }
+  }
+
+  const window = future.slice(bestStart, bestStart + windowHours);
+  return {
+    startTime: window[0].time,
+    endTime: window[window.length - 1].time,
+    avgScore: Math.round(bestAvg),
+    grade: scoreToGrade(bestAvg),
+  };
 }

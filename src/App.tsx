@@ -136,6 +136,9 @@ export default function App() {
           zoneScores={zoneScores}
           customZones={customZones}
           targetDate={targetDate}
+          nowDate={NOW}
+          getConditionsAt={getConditionsAt}
+          getTideAt={getTideAt}
           onLocationChange={handleLocationChange}
           onRequestCreateZone={handleRequestCreateZone}
           onRemoveCustomZone={handleRemoveCustomZone}

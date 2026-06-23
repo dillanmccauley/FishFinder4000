@@ -48,6 +48,10 @@ export interface MarineConditions {
   visibilityMi: number;
   /** Hourly rainfall from Open-Meteo — primary driver of inshore turbidity */
   precipitationMm: number;
+  /** Barometric pressure in hPa from Open-Meteo */
+  pressureHpa: number;
+  /** UV index 0–11+ from Open-Meteo */
+  uvIndex: number;
   timestamp: Date;
 }
 
@@ -60,23 +64,41 @@ export interface TideInfo {
 
 export interface ZoneScore {
   hotspotId: string;
-  total: number;       // 0–100 composite
+  total: number;         // 0–100 composite
   grade: Grade;
-  marineScore: number; // 40% — wind, waves, sea temp (Open-Meteo)
-  seasonScore: number; // 35% — monthly migration + water-temp adjustment
-  tideScore: number;   // 15% — phase match + tidal movement (NOAA)
-  moonScore: number;   // 10% — lunar phase (new/full = peak)
-  moonPhase: number;   // 0–1 raw (0 = new, 0.5 = full)
+  marineScore: number;   // 28% — wind, waves, sea temp (Open-Meteo)
+  pressureScore: number; // 12% — barometric pressure + trend
+  seasonScore: number;   // 25% — monthly migration + water-temp + bait proxy
+  tideScore: number;     // 15% — phase match + tidal movement (NOAA)
+  moonScore: number;     // 8% — lunar phase (new/full = peak)
+  uvScore: number;       // 7% — UV index, weighted by species clarity preference
+  clarityScore: number;  // 5% — estimated water clarity
+  algaePenalty: number;  // 0–26 pts deducted from clarity due to bloom risk
+  baitScore: number;     // 0–100 seasonal bait availability proxy
+  pressureDelta: number; // hPa change over 3h (positive = rising)
+  moonPhase: number;     // 0–1 raw (0 = new, 0.5 = full)
   moonPhaseName: string;
   moonPhaseEmoji: string;
-  clarityScore: number;  // 0–100 estimated water clarity
-  algaePenalty: number;  // 0–26 pts deducted from clarity due to bloom risk
   activeSpecies: Species[];
   conditions: MarineConditions | null;
   tide: TideInfo | null;
-  confidence: number;  // 0–1 forecast confidence decay
+  confidence: number;    // 0–1 forecast confidence decay
   isForecast: boolean;
   forecastHoursAhead: number;
+}
+
+export interface HourlyScore {
+  time: Date;
+  total: number;
+  grade: Grade;
+  marineScore: number;
+  seasonScore: number;
+  tideScore: number;
+  moonScore: number;
+  pressureScore: number;
+  uvScore: number;
+  clarityScore: number;
+  conditions: MarineConditions | null;
 }
 
 export interface TimeOffset {

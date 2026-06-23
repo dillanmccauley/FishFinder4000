@@ -47,7 +47,7 @@ export function useMarineData(location: LatLng): MarineDataResult {
     setLoading(true);
 
     const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${location.lat}&longitude=${location.lng}&hourly=wave_height,sea_surface_temperature&timezone=America%2FNew_York&forecast_days=4&past_days=1`;
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${location.lat}&longitude=${location.lng}&hourly=wind_speed_10m,wind_direction_10m,visibility,precipitation&timezone=America%2FNew_York&forecast_days=4&past_days=1&wind_speed_unit=mph`;
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${location.lat}&longitude=${location.lng}&hourly=wind_speed_10m,wind_direction_10m,visibility,precipitation,surface_pressure,uv_index&timezone=America%2FNew_York&forecast_days=4&past_days=1&wind_speed_unit=mph`;
 
     Promise.all([fetch(marineUrl), fetch(weatherUrl)])
       .then(async ([mr, wr]) => {
@@ -62,6 +62,8 @@ export function useMarineData(location: LatLng): MarineDataResult {
             windDirectionDeg: weather.hourly?.wind_direction_10m?.[i] ?? 180,
             visibilityMi: (weather.hourly?.visibility?.[i] ?? 10000) / 1609.34,
             precipitationMm: weather.hourly?.precipitation?.[i] ?? 0,
+            pressureHpa: weather.hourly?.surface_pressure?.[i] ?? 1013,
+            uvIndex: weather.hourly?.uv_index?.[i] ?? 5,
             timestamp: new Date(isoTime),
           };
         });
@@ -120,6 +122,8 @@ function seedFallbackData(location: LatLng) {
         windDirectionDeg: 180 + (Math.random() * 90 - 45),
         visibilityMi: 8 + Math.random() * 4,
         precipitationMm: 0,
+        pressureHpa: 1013 + (Math.random() * 6 - 3),
+        uvIndex: Math.max(0, 6 * Math.sin(Math.max(0, (h % 24 - 6) / 12 * Math.PI))),
         timestamp: t,
       };
     }

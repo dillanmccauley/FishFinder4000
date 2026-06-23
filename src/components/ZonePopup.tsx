@@ -70,10 +70,13 @@ export function ZonePopup({ score, hotspot, onRemove }: Props) {
         <div style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>
           SCORE BREAKDOWN
         </div>
-        <ScoreBar label="Marine Conditions" value={score.marineScore} weight="40%" color="#38bdf8" />
-        <ScoreBar label="Season & Temp" value={score.seasonScore} weight="35%" color="#4ade80" />
+        <ScoreBar label="Marine Conditions" value={score.marineScore} weight="28%" color="#38bdf8" />
+        <ScoreBar label="Pressure" value={score.pressureScore} weight="12%" color="#c084fc" />
+        <ScoreBar label="Season & Temp" value={score.seasonScore} weight="25%" color="#4ade80" />
         <ScoreBar label="Tide Phase" value={score.tideScore} weight="15%" color="#a78bfa" />
-        <ScoreBar label="Moon Phase" value={score.moonScore} weight="10%" color="#fbbf24" />
+        <ScoreBar label="Moon Phase" value={score.moonScore} weight="8%" color="#fbbf24" />
+        <ScoreBar label="UV Index" value={score.uvScore} weight="7%" color="#facc15" />
+        <ScoreBar label="Water Clarity" value={score.clarityScore} weight="5%" color="#67e8f9" />
       </div>
 
       {/* Active species */}
@@ -153,15 +156,33 @@ export function ZonePopup({ score, hotspot, onRemove }: Props) {
           <CondRow icon="🌡" label="Water Temp" value={score.conditions ? formatTempF(score.conditions.waterTempF) : '—'} />
           <CondRow icon="🌊" label="Waves" value={score.conditions ? `${score.conditions.waveHeightFt.toFixed(1)} ft` : '—'} />
           <CondRow icon="💨" label="Wind" value={score.conditions ? formatWind(score.conditions.windSpeedMph, score.conditions.windDirectionDeg) : '—'} />
+          <CondRow
+            icon="🌡"
+            label="Pressure"
+            value={score.conditions ? `${score.conditions.pressureHpa.toFixed(0)} hPa ${score.pressureDelta > 1 ? '▲ Rising' : score.pressureDelta < -1 ? '▼ Falling' : '— Stable'}` : '—'}
+            valueColor={score.pressureDelta > 1 ? '#4ade80' : score.pressureDelta < -3 ? '#f87171' : '#e2e8f0'}
+          />
           <CondRow icon="🌊" label="Tide" value={score.tide ? TIDE_ICONS[score.tide.phase] ?? score.tide.phase : '—'} />
           {score.tide && <CondRow icon="📏" label="Tide Height" value={`${score.tide.heightFt.toFixed(1)} ft`} />}
           {score.tide && <CondRow icon="⏰" label="Next Event" value={score.tide.nextEventLabel} />}
           <CondRow icon={score.moonPhaseEmoji} label="Moon" value={score.moonPhaseName} />
           <CondRow
+            icon="☀️"
+            label="UV Index"
+            value={score.conditions ? `${score.conditions.uvIndex.toFixed(1)} — ${score.conditions.uvIndex <= 2 ? 'Low' : score.conditions.uvIndex <= 5 ? 'Moderate' : score.conditions.uvIndex <= 8 ? 'High' : 'Very High'}` : '—'}
+            valueColor={score.conditions && score.conditions.uvIndex >= 8 ? '#f97316' : score.conditions && score.conditions.uvIndex >= 5 ? '#fbbf24' : '#4ade80'}
+          />
+          <CondRow
             icon="💧"
             label="Water Clarity"
             value={`${clarityAdvice(score.clarityScore).label} (~${clarityAdvice(score.clarityScore).visibilityEst})`}
             valueColor={clarityAdvice(score.clarityScore).color}
+          />
+          <CondRow
+            icon="🐟"
+            label="Bait Activity"
+            value={score.baitScore >= 85 ? 'High' : score.baitScore >= 60 ? 'Moderate' : 'Low'}
+            valueColor={score.baitScore >= 85 ? '#4ade80' : score.baitScore >= 60 ? '#fbbf24' : '#94a3b8'}
           />
         </div>
         {score.conditions && score.conditions.precipitationMm > 0 && (

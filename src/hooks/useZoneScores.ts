@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { ZoneScore, MarineConditions, TideInfo, Hotspot } from '../types';
 import { HOTSPOTS } from '../data/hotspots';
 import { SPECIES_MAP } from '../data/species';
+import { addHours } from 'date-fns';
 import {
   calcMoonScore,
   calcMarineScore,
@@ -10,6 +11,9 @@ import {
   calcZoneScore,
   calcClarityScore,
   calcAlgaePenalty,
+  calcPressureScore,
+  calcUVScore,
+  calcBaitScore,
   scoreToGrade,
   calcConfidence,
 } from '../utils/scoring';
@@ -41,28 +45,40 @@ export function useZoneScores({
     allHotspots.forEach((hotspot) => {
       const species = hotspot.activeSpeciesIds.map(id => SPECIES_MAP.get(id)!).filter(Boolean);
       const conditions = getConditionsAt(hotspot.location, targetDate);
+      const prevConditions = getConditionsAt(hotspot.location, addHours(targetDate, -3));
       const tide = getTideAt(hotspot.tideStationId, targetDate);
 
       const marineScore = calcMarineScore(conditions, species);
-      const seasonScore = calcSeasonScore(species, targetDate, conditions?.waterTempF);
+      const pressureScore = calcPressureScore(conditions, prevConditions);
+      const baseSeasonScore = calcSeasonScore(species, targetDate, conditions?.waterTempF);
+      const isNortheast = hotspot.location.lat >= 37;
+      const baitScore = calcBaitScore(targetDate, isNortheast);
+      const seasonScore = baseSeasonScore * 0.75 + baitScore * 0.25;
       const tideScore = calcTideScore(tide, species);
+      const uvScore = calcUVScore(conditions, species);
       const clarityScore = calcClarityScore(conditions, hotspot.depthRangeFt, targetDate);
       const algaePenalty = calcAlgaePenalty(conditions, hotspot.depthRangeFt, targetDate);
-      const total = calcZoneScore({ marineScore, seasonScore, tideScore, moonScore });
+      const pressureDelta = conditions && prevConditions
+        ? conditions.pressureHpa - prevConditions.pressureHpa : 0;
+      const total = calcZoneScore({ marineScore, pressureScore, seasonScore, tideScore, moonScore, uvScore, clarityScore });
 
       map.set(hotspot.id, {
         hotspotId: hotspot.id,
         total,
         grade: scoreToGrade(total),
         marineScore,
+        pressureScore,
         seasonScore,
         tideScore,
         moonScore,
+        uvScore,
+        clarityScore,
+        algaePenalty,
+        baitScore,
+        pressureDelta,
         moonPhase,
         moonPhaseName,
         moonPhaseEmoji,
-        clarityScore,
-        algaePenalty,
         activeSpecies: species,
         conditions,
         tide,

@@ -1,19 +1,10 @@
 import { useState } from 'react';
 import type { Hotspot } from '../types';
 import { HOTSPOTS } from '../data/hotspots';
-
-function distanceMi(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const dLat = (b.lat - a.lat) * Math.PI / 180;
-  const dLng = (b.lng - a.lng) * Math.PI / 180;
-  const h = Math.sin(dLat / 2) ** 2 +
-    Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-  return 3958.8 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
+import { nearestHotspot } from '../utils/geo';
 
 function nearestTideStation(loc: { lat: number; lng: number }): string {
-  return HOTSPOTS.reduce((best, h) =>
-    distanceMi(loc, h.location) < distanceMi(loc, best.location) ? h : best
-  ).tideStationId;
+  return nearestHotspot(loc, HOTSPOTS).tideStationId;
 }
 
 const STORAGE_KEY = 'fishfinder-custom-zones';
