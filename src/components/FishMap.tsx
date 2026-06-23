@@ -2,16 +2,17 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import { createRoot } from 'react-dom/client';
-import type { LatLng, ZoneScore, Hotspot, MarineConditions, TideInfo } from '../types';
+import type { BBox, LatLng, ZoneScore, Hotspot, MarineConditions, TideInfo } from '../types';
 import { HOTSPOTS } from '../data/hotspots';
 import { GRADE_COLORS, GRADE_LABELS } from '../utils/scoring';
-import { FishingHeatLayer } from '../utils/fishingHeatLayer';
+import { RasterHeatLayer } from '../utils/rasterHeatLayer';
 import { ZonePopup } from './ZonePopup';
 import { SearchBar } from './SearchBar';
 import { Legend } from './Legend';
 import { NearMePanel } from './NearMePanel';
 import { SpotForecastPanel } from './SpotForecastPanel';
 import { useLocationForecast } from '../hooks/useLocationForecast';
+import { useRasterForecast } from '../hooks/useRasterForecast';
 
 const RADIUS_MILES = 25;
 const METERS_PER_MILE = 1609.34;
@@ -72,12 +73,16 @@ export function FishMap({
   const userMarkerRef = useRef<L.Marker | null>(null);
   const popupRootsRef = useRef<Map<string, ReturnType<typeof createRoot>>>(new Map());
   const depthLayerRef = useRef<L.TileLayer | null>(null);
-  const heatLayerRef = useRef<FishingHeatLayer | null>(null);
+  const rasterLayerRef = useRef<RasterHeatLayer | null>(null);
   const pinMarkerRef = useRef<L.Marker | null>(null);
+  const selectionStartRef = useRef<L.LatLng | null>(null);
+  const selectionRectRef = useRef<L.Rectangle | null>(null);
+
   const [legendVisible, setLegendVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [depthLayerVisible, setDepthLayerVisible] = useState(false);
-  const [heatVisible, setHeatVisible] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [rasterBBox, setRasterBBox] = useState<BBox | null>(null);
   const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
 
   const { hourlyScores } = useLocationForecast({
@@ -86,6 +91,14 @@ export function FishMap({
     getTideAt,
     nowDate,
   });
+
+  const { gridPoints, loading: rasterLoading, pointsLoaded, pointsTotal } = useRasterForecast(
+    rasterBBox,
+    targetDate,
+    getConditionsAt,
+    getTideAt,
+    nowDate,
+  );
 
   // Combined hotspot map (regular + custom)
   const allHotspotsMap = useMemo(() => {
@@ -128,12 +141,13 @@ export function FishMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Map click handler: zone creation mode OR pin drop
+  // Map click handler: zone creation mode OR pin drop (not in selection mode)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     const handler = (e: L.LeafletMouseEvent) => {
+      if (selectionMode) return; // selection handled via mousedown/up
       const loc = { lat: e.latlng.lat, lng: e.latlng.lng };
       if (isCreating) {
         onRequestCreateZone(loc);
@@ -145,13 +159,97 @@ export function FishMap({
 
     map.on('click', handler);
     return () => { map.off('click', handler); };
-  }, [isCreating, onRequestCreateZone]);
+  }, [isCreating, selectionMode, onRequestCreateZone]);
 
-  // Cursor style in creation mode
+  // Cursor style
   useEffect(() => {
     if (!containerRef.current) return;
-    containerRef.current.style.cursor = isCreating ? 'crosshair' : '';
-  }, [isCreating]);
+    containerRef.current.style.cursor = (isCreating || selectionMode) ? 'crosshair' : '';
+  }, [isCreating, selectionMode]);
+
+  // Rectangle selection drawing
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!selectionMode) return;
+
+    const onMouseDown = (e: L.LeafletMouseEvent) => {
+      L.DomEvent.stopPropagation(e);
+      selectionStartRef.current = e.latlng;
+      map.dragging.disable();
+
+      // Create preview rectangle
+      selectionRectRef.current?.remove();
+      selectionRectRef.current = L.rectangle(
+        L.latLngBounds(e.latlng, e.latlng),
+        { color: '#22d3ee', weight: 2, fillOpacity: 0.08, dashArray: '6 4' }
+      ).addTo(map);
+    };
+
+    const onMouseMove = (e: L.LeafletMouseEvent) => {
+      if (!selectionStartRef.current || !selectionRectRef.current) return;
+      selectionRectRef.current.setBounds(L.latLngBounds(selectionStartRef.current, e.latlng));
+    };
+
+    const onMouseUp = (e: L.LeafletMouseEvent) => {
+      if (!selectionStartRef.current) return;
+      map.dragging.enable();
+
+      const sw = selectionStartRef.current;
+      const ne = e.latlng;
+      selectionStartRef.current = null;
+      selectionRectRef.current?.remove();
+      selectionRectRef.current = null;
+
+      const minLat = Math.min(sw.lat, ne.lat);
+      const maxLat = Math.max(sw.lat, ne.lat);
+      const minLng = Math.min(sw.lng, ne.lng);
+      const maxLng = Math.max(sw.lng, ne.lng);
+
+      // Need at least a 0.1° box
+      if (maxLat - minLat < 0.05 || maxLng - minLng < 0.05) {
+        setSelectionMode(false);
+        return;
+      }
+
+      setRasterBBox({
+        sw: { lat: minLat, lng: minLng },
+        ne: { lat: maxLat, lng: maxLng },
+      });
+      setSelectionMode(false);
+    };
+
+    map.on('mousedown', onMouseDown);
+    map.on('mousemove', onMouseMove);
+    map.on('mouseup', onMouseUp);
+
+    return () => {
+      map.off('mousedown', onMouseDown);
+      map.off('mousemove', onMouseMove);
+      map.off('mouseup', onMouseUp);
+      map.dragging.enable();
+      selectionRectRef.current?.remove();
+      selectionRectRef.current = null;
+      selectionStartRef.current = null;
+    };
+  }, [selectionMode]);
+
+  // Raster heat layer — update when gridPoints or bbox changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (rasterBBox && gridPoints.length > 0) {
+      if (!rasterLayerRef.current) {
+        rasterLayerRef.current = new RasterHeatLayer();
+        rasterLayerRef.current.addTo(map);
+      }
+      rasterLayerRef.current.updateGrid(gridPoints);
+    } else if (!rasterBBox) {
+      rasterLayerRef.current?.remove();
+      rasterLayerRef.current = null;
+    }
+  }, [gridPoints, rasterBBox]);
 
   // ESRI Ocean Reference depth tile overlay
   useEffect(() => {
@@ -175,27 +273,6 @@ export function FishMap({
       depthLayerRef.current?.remove();
     }
   }, [depthLayerVisible]);
-
-  // Fishing heatmap layer
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    if (heatVisible) {
-      if (!heatLayerRef.current) {
-        heatLayerRef.current = new FishingHeatLayer();
-        heatLayerRef.current.addTo(map);
-      }
-      const pts = [...allHotspotsMap.values()].map(h => {
-        const s = zoneScores.get(h.id);
-        return s ? { lat: h.location.lat, lng: h.location.lng, score: s.total } : null;
-      }).filter((p): p is { lat: number; lng: number; score: number } => p !== null);
-      heatLayerRef.current.updatePoints(pts);
-    } else {
-      heatLayerRef.current?.remove();
-      heatLayerRef.current = null;
-    }
-  }, [heatVisible, zoneScores, allHotspotsMap]);
 
   // Pin marker
   useEffect(() => {
@@ -251,7 +328,6 @@ export function FishMap({
     const map = mapRef.current;
     if (!map) return;
 
-    // Remove markers for zones that no longer exist
     markersRef.current.forEach((marker, id) => {
       if (!allHotspotsMap.has(id)) {
         marker.remove();
@@ -293,7 +369,7 @@ export function FishMap({
     });
   }, [zoneScores, allHotspotsMap]);
 
-  // Update popup content when scores or custom zones change
+  // Update popup content when scores change
   useEffect(() => {
     allHotspotsMap.forEach((hotspot, id) => {
       const score = zoneScores.get(id);
@@ -309,6 +385,12 @@ export function FishMap({
       );
     });
   }, [zoneScores, allHotspotsMap, onRemoveCustomZone]);
+
+  const clearRaster = () => {
+    rasterLayerRef.current?.remove();
+    rasterLayerRef.current = null;
+    setRasterBBox(null);
+  };
 
   return (
     <div className="relative w-full h-full">
@@ -329,98 +411,67 @@ export function FishMap({
 
       {/* Map control buttons */}
       <div style={{ position: 'absolute', top: 56, right: 12, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {/* Add Zone FAB */}
+
+        {/* Add Zone */}
         <button
-          onClick={() => setIsCreating(v => !v)}
-          title={isCreating ? 'Cancel — click map to place zone' : 'Add custom zone'}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '7px 14px',
-            borderRadius: 10,
-            background: isCreating ? '#0ea5e9' : '#1e293bef',
-            border: `1px solid ${isCreating ? '#7dd3fc' : '#38bdf8'}`,
-            color: isCreating ? '#0f172a' : '#38bdf8',
-            cursor: 'pointer',
-            fontSize: 12,
-            fontWeight: 700,
-            boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
-            backdropFilter: 'blur(8px)',
-            whiteSpace: 'nowrap',
-          }}
+          onClick={() => { setSelectionMode(false); setIsCreating(v => !v); }}
+          title={isCreating ? 'Cancel' : 'Add custom zone'}
+          style={btnStyle(isCreating, '#0ea5e9', '#38bdf8')}
         >
           {isCreating ? '✕ Cancel' : '✎ Add Zone'}
         </button>
-        {isCreating && (
-          <div
-            style={{
-              padding: '6px 10px',
-              borderRadius: 8,
-              background: '#0ea5e920',
-              border: '1px solid #0ea5e960',
-              color: '#38bdf8',
-              fontSize: 11,
-              textAlign: 'center',
-              whiteSpace: 'nowrap',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-            }}
-          >
-            Click map to place zone
-          </div>
-        )}
+        {isCreating && <HintPill>Click map to place zone</HintPill>}
 
-        {/* Heat map toggle */}
+        {/* Select Area for raster heatmap */}
         <button
-          onClick={() => setHeatVisible(v => !v)}
-          title={heatVisible ? 'Hide fishing heatmap' : 'Show fishing grade heatmap'}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '7px 14px',
-            borderRadius: 10,
-            background: heatVisible ? '#16a34a' : '#1e293bef',
-            border: `1px solid ${heatVisible ? '#4ade80' : '#16a34a'}`,
-            color: heatVisible ? '#fff' : '#4ade80',
-            cursor: 'pointer',
-            fontSize: 12,
-            fontWeight: 700,
-            boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
-            backdropFilter: 'blur(8px)',
-            whiteSpace: 'nowrap',
-          }}
+          onClick={() => { setIsCreating(false); setSelectionMode(v => !v); }}
+          title={selectionMode ? 'Cancel selection' : 'Draw area for fishing heatmap'}
+          style={btnStyle(selectionMode, '#22d3ee', '#22d3ee')}
         >
-          🎣 {heatVisible ? 'Hide Heat' : 'Heat Map'}
+          {selectionMode ? '✕ Cancel' : '🗺 Select Area'}
         </button>
+        {selectionMode && <HintPill>Click & drag to draw selection</HintPill>}
+
+        {/* Clear raster */}
+        {rasterBBox && !rasterLoading && (
+          <button
+            onClick={clearRaster}
+            style={btnStyle(false, '#ef4444', '#f87171')}
+          >
+            ✕ Clear Raster
+          </button>
+        )}
 
         {/* Depth chart toggle */}
         <button
           onClick={() => setDepthLayerVisible(v => !v)}
           title={depthLayerVisible ? 'Hide depth chart' : 'Show ocean depth chart'}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '7px 14px',
-            borderRadius: 10,
-            background: depthLayerVisible ? '#6366f1' : '#1e293bef',
-            border: `1px solid ${depthLayerVisible ? '#a5b4fc' : '#6366f1'}`,
-            color: depthLayerVisible ? '#fff' : '#a5b4fc',
-            cursor: 'pointer',
-            fontSize: 12,
-            fontWeight: 700,
-            boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
-            backdropFilter: 'blur(8px)',
-            whiteSpace: 'nowrap',
-          }}
+          style={btnStyle(depthLayerVisible, '#6366f1', '#a5b4fc')}
         >
           🌊 {depthLayerVisible ? 'Hide Depth' : 'Depth Chart'}
         </button>
       </div>
 
-      {/* Heatmap legend */}
-      {heatVisible && (
+      {/* Raster loading progress */}
+      {rasterLoading && (
+        <div style={{
+          position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 9999, background: '#0f172aee', border: '1px solid #22d3ee44',
+          borderRadius: 8, padding: '6px 14px',
+          fontSize: 12, color: '#22d3ee', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
+        }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: '50%', border: '2px solid #22d3ee',
+            borderTopColor: 'transparent', display: 'inline-block',
+            animation: 'spin 0.8s linear infinite',
+          }} />
+          Raster: {pointsLoaded} / {pointsTotal} points
+        </div>
+      )}
+
+      {/* Raster legend */}
+      {(rasterBBox && gridPoints.length > 0) && (
         <div style={{
           position: 'absolute', bottom: 104, right: 12, zIndex: 9999,
           background: '#0f172aee', border: '1px solid #1e293b',
@@ -435,6 +486,9 @@ export function FishMap({
               <span style={{ fontSize: 10, color: '#94a3b8' }}>{g} — {GRADE_LABELS[g]}</span>
             </div>
           ))}
+          <div style={{ fontSize: 9, color: '#475569', marginTop: 5, borderTop: '1px solid #1e293b', paddingTop: 4 }}>
+            {gridPoints.length} grid pts · 0.1° spacing
+          </div>
         </div>
       )}
 
@@ -453,6 +507,43 @@ export function FishMap({
       >
         Data: Open-Meteo Marine · NOAA Tides & Currents · NOAA FishWatch
       </div>
+    </div>
+  );
+}
+
+function btnStyle(active: boolean, activeColor: string, borderColor: string): React.CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '7px 14px',
+    borderRadius: 10,
+    background: active ? activeColor : '#1e293bef',
+    border: `1px solid ${active ? activeColor : borderColor}`,
+    color: active ? (activeColor === '#0ea5e9' ? '#0f172a' : '#fff') : borderColor,
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 700,
+    boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
+    backdropFilter: 'blur(8px)',
+    whiteSpace: 'nowrap',
+  };
+}
+
+function HintPill({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      padding: '6px 10px',
+      borderRadius: 8,
+      background: '#0ea5e920',
+      border: '1px solid #0ea5e960',
+      color: '#38bdf8',
+      fontSize: 11,
+      textAlign: 'center',
+      whiteSpace: 'nowrap',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+    }}>
+      {children}
     </div>
   );
 }

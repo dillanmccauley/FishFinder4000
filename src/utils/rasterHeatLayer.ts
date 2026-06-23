@@ -1,6 +1,5 @@
 import L from 'leaflet';
-
-interface HeatPoint { lat: number; lng: number; score: number; }
+import type { GridPoint } from '../types';
 
 const COLOR_STOPS = [
   { s: 0,   r: 127, g: 29,  b: 19  },
@@ -31,18 +30,28 @@ function scoreToRGB(score: number): [number, number, number] {
   ];
 }
 
-const RESOLUTION = 3;
-const FADE_START = 150;
-const FADE_END = 230;
-const MAX_ALPHA = 0.60;
+const RESOLUTION = 2;
+const MAX_ALPHA = 0.75;
 
-export class FishingHeatLayer extends L.Layer {
+export class RasterHeatLayer extends L.Layer {
   private _canvas: HTMLCanvasElement | null = null;
-  private _points: HeatPoint[] = [];
+  private _grid: GridPoint[] = [];
+  private _lats: number[] = [];
+  private _lngs: number[] = [];
+  private _scoreMap = new Map<string, number>();
   private _rafId: number | null = null;
 
-  updatePoints(pts: HeatPoint[]): void {
-    this._points = pts;
+  updateGrid(pts: GridPoint[]): void {
+    this._grid = pts;
+
+    // Build sorted unique lat/lng arrays and a fast score lookup
+    const latSet = new Set(pts.map(p => p.lat));
+    const lngSet = new Set(pts.map(p => p.lng));
+    this._lats = [...latSet].sort((a, b) => a - b);
+    this._lngs = [...lngSet].sort((a, b) => a - b);
+    this._scoreMap.clear();
+    pts.forEach(p => this._scoreMap.set(`${p.lat.toFixed(4)},${p.lng.toFixed(4)}`, p.score));
+
     this._scheduleRender();
   }
 
@@ -55,7 +64,6 @@ export class FishingHeatLayer extends L.Layer {
     this._canvas.style.pointerEvents = 'none';
     this._canvas.style.zIndex = '200';
     pane.appendChild(this._canvas);
-
     map.on('moveend zoomend resize', this._scheduleRender, this);
     this._scheduleRender();
     return this;
@@ -64,21 +72,54 @@ export class FishingHeatLayer extends L.Layer {
   onRemove(map: L.Map): this {
     map.off('moveend zoomend resize', this._scheduleRender, this);
     if (this._rafId !== null) { cancelAnimationFrame(this._rafId); this._rafId = null; }
-    if (this._canvas) { this._canvas.remove(); this._canvas = null; }
+    this._canvas?.remove();
+    this._canvas = null;
     return this;
   }
 
   private _scheduleRender = (): void => {
     if (this._rafId !== null) cancelAnimationFrame(this._rafId);
-    this._rafId = requestAnimationFrame(() => {
-      this._rafId = null;
-      this._render();
-    });
+    this._rafId = requestAnimationFrame(() => { this._rafId = null; this._render(); });
   };
+
+  private _bilinear(lat: number, lng: number): number | null {
+    const lats = this._lats;
+    const lngs = this._lngs;
+
+    // Find surrounding grid cell
+    let latLo = -1, lngLo = -1;
+    for (let i = 0; i < lats.length - 1; i++) {
+      if (lat >= lats[i] && lat <= lats[i + 1]) { latLo = i; break; }
+    }
+    for (let j = 0; j < lngs.length - 1; j++) {
+      if (lng >= lngs[j] && lng <= lngs[j + 1]) { lngLo = j; break; }
+    }
+    if (latLo < 0 || lngLo < 0) return null;
+
+    const la = lats[latLo], lb = lats[latLo + 1];
+    const ga = lngs[lngLo], gb = lngs[lngLo + 1];
+
+    const q11 = this._scoreMap.get(`${la.toFixed(4)},${ga.toFixed(4)}`);
+    const q12 = this._scoreMap.get(`${la.toFixed(4)},${gb.toFixed(4)}`);
+    const q21 = this._scoreMap.get(`${lb.toFixed(4)},${ga.toFixed(4)}`);
+    const q22 = this._scoreMap.get(`${lb.toFixed(4)},${gb.toFixed(4)}`);
+
+    if (q11 == null || q12 == null || q21 == null || q22 == null) return null;
+
+    const tx = lb === la ? 0 : (lat - la) / (lb - la);
+    const ty = gb === ga ? 0 : (lng - ga) / (gb - ga);
+
+    return (
+      q11 * (1 - tx) * (1 - ty) +
+      q12 * (1 - tx) * ty +
+      q21 * tx * (1 - ty) +
+      q22 * tx * ty
+    );
+  }
 
   private _render(): void {
     const map = this._map as L.Map | undefined;
-    if (!map || !this._canvas || this._points.length === 0) return;
+    if (!map || !this._canvas || this._grid.length === 0 || this._lats.length < 2 || this._lngs.length < 2) return;
 
     const size = map.getSize();
     const w = size.x;
@@ -86,7 +127,6 @@ export class FishingHeatLayer extends L.Layer {
     this._canvas.width = w;
     this._canvas.height = h;
 
-    // Position canvas at the map's top-left pixel
     const topLeft = map.containerPointToLayerPoint([0, 0]);
     L.DomUtil.setPosition(this._canvas, topLeft);
 
@@ -94,36 +134,16 @@ export class FishingHeatLayer extends L.Layer {
     const imgData = ctx.createImageData(w, h);
     const data = imgData.data;
 
-    // Pre-project all hotspot points to pixel coordinates
-    const pixelPts = this._points.map(p => {
-      const pt = map.latLngToContainerPoint(L.latLng(p.lat, p.lng));
-      return { x: pt.x, y: pt.y, score: p.score };
-    });
+    const alpha = Math.round(MAX_ALPHA * 255);
 
     for (let py = 0; py < h; py += RESOLUTION) {
       for (let px = 0; px < w; px += RESOLUTION) {
-        let wSum = 0;
-        let scoreSum = 0;
-        let minDist = Infinity;
+        const ll = map.containerPointToLatLng(L.point(px, py));
+        const score = this._bilinear(ll.lat, ll.lng);
+        if (score === null) continue;
 
-        for (const pp of pixelPts) {
-          const dx = px - pp.x;
-          const dy = py - pp.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < minDist) minDist = dist;
-          const w2 = dist < 0.5 ? 1e10 : 1 / (dist * dist);
-          wSum += w2;
-          scoreSum += pp.score * w2;
-        }
-
-        if (minDist > FADE_END) continue;
-        const score = wSum > 0 ? scoreSum / wSum : 50;
         const [r, g, b] = scoreToRGB(score);
-        const distAlpha = minDist <= FADE_START ? 1
-          : 1 - (minDist - FADE_START) / (FADE_END - FADE_START);
-        const alpha = Math.round(MAX_ALPHA * distAlpha * 255);
 
-        // Fill RESOLUTION×RESOLUTION block
         for (let by = 0; by < RESOLUTION && py + by < h; by++) {
           for (let bx = 0; bx < RESOLUTION && px + bx < w; bx++) {
             const idx = ((py + by) * w + (px + bx)) * 4;

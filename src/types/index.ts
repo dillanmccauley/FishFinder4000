@@ -105,3 +105,14 @@ export interface TimeOffset {
   /** Hours relative to now: negative = past, positive = future */
   hours: number;
 }
+
+export interface BBox {
+  sw: LatLng;
+  ne: LatLng;
+}
+
+export interface GridPoint {
+  lat: number;
+  lng: number;
+  score: number;
+}

@@ -106,6 +106,42 @@ export function useMarineData(location: LatLng): MarineDataResult {
   return { getConditionsAt, loading, error };
 }
 
+/**
+ * Fetches Open-Meteo data for a single grid point and populates the shared CACHE.
+ * Returns true on success, false on failure — does NOT seed synthetic fallback data.
+ * Safe to call in parallel for many grid points.
+ */
+export async function fetchGridPoint(lat: number, lng: number): Promise<boolean> {
+  const locKey = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+  if (Object.keys(CACHE).some(k => k.startsWith(locKey + '@'))) return true;
+  const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=wave_height,sea_surface_temperature&timezone=America%2FNew_York&forecast_days=4&past_days=1`;
+  const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=wind_speed_10m,wind_direction_10m,visibility,precipitation,surface_pressure,uv_index&timezone=America%2FNew_York&forecast_days=4&past_days=1&wind_speed_unit=mph`;
+  try {
+    const [mr, wr] = await Promise.all([fetch(marineUrl), fetch(weatherUrl)]);
+    if (!mr.ok || !wr.ok) return false;
+    const [marine, weather] = await Promise.all([mr.json(), wr.json()]);
+    const times: string[] = marine.hourly?.time ?? [];
+    if (!times.length) return false;
+    times.forEach((isoTime, i) => {
+      const key = cacheKey(lat, lng, isoTime);
+      CACHE[key] = {
+        waterTempF: cToF(marine.hourly.sea_surface_temperature?.[i] ?? 24),
+        waveHeightFt: metersToFt(marine.hourly.wave_height?.[i] ?? 0.3),
+        windSpeedMph: msToMph(weather.hourly?.wind_speed_10m?.[i] ?? 8),
+        windDirectionDeg: weather.hourly?.wind_direction_10m?.[i] ?? 180,
+        visibilityMi: (weather.hourly?.visibility?.[i] ?? 10000) / 1609.34,
+        precipitationMm: weather.hourly?.precipitation?.[i] ?? 0,
+        pressureHpa: weather.hourly?.surface_pressure?.[i] ?? 1013,
+        uvIndex: weather.hourly?.uv_index?.[i] ?? 5,
+        timestamp: new Date(isoTime),
+      };
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function seedFallbackData(location: LatLng) {
   const now = new Date();
   for (let h = -12; h <= 60; h++) {
