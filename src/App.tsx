@@ -4,7 +4,6 @@ import type { LatLng } from './types';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useMarineData } from './hooks/useMarineData';
 import { useTideData } from './hooks/useTideData';
-import { useBiteReports } from './hooks/useBiteReports';
 import { useZoneScores } from './hooks/useZoneScores';
 import { useCustomZones } from './hooks/useCustomZones';
 import { FishMap } from './components/FishMap';
@@ -28,7 +27,6 @@ export default function App() {
   const stationIds = HOTSPOTS.map(h => h.tideStationId);
   const { getTideAt, loading: tideLoading } = useTideData(stationIds);
 
-  const biteReports = useBiteReports();
   const { customZones, addZone, removeZone } = useCustomZones();
   const targetDate = addHours(NOW, offsetHours);
 
@@ -36,7 +34,6 @@ export default function App() {
     targetDate,
     getConditionsAt,
     getTideAt,
-    biteReports,
     nowDate: NOW,
     customHotspots: customZones,
   });
@@ -138,6 +135,7 @@ export default function App() {
           userLocation={activeCenter}
           zoneScores={zoneScores}
           customZones={customZones}
+          targetDate={targetDate}
           onLocationChange={handleLocationChange}
           onRequestCreateZone={handleRequestCreateZone}
           onRemoveCustomZone={handleRemoveCustomZone}

@@ -1,4 +1,4 @@
-import type { Grade, MarineConditions, TideInfo, BiteReport, Species } from '../types';
+import type { Grade, MarineConditions, TideInfo, Species } from '../types';
 
 export function scoreToGrade(score: number): Grade {
   if (score >= 88) return 'A';
@@ -36,42 +36,25 @@ export const GRADE_LABELS: Record<Grade, string> = {
   F: 'Dead',
 };
 
-/** Score bite reports for a zone (0–100) */
-export function calcBiteScore(reports: BiteReport[], targetDate: Date): number {
-  if (!reports.length) return 35; // baseline with no data
-  const windowMs = 72 * 60 * 60 * 1000;
-  const relevant = reports.filter(r => {
-    const diff = Math.abs(r.timestamp.getTime() - targetDate.getTime());
-    return diff < windowMs;
-  });
-  if (!relevant.length) return 30;
-  const recencyWeighted = relevant.reduce((sum, r) => {
-    const hoursOld = Math.abs(targetDate.getTime() - r.timestamp.getTime()) / 3600000;
-    const recencyFactor = Math.max(0, 1 - hoursOld / 72);
-    return sum + r.intensity * recencyFactor * (r.verified ? 1.2 : 1.0);
-  }, 0);
-  return Math.min(100, recencyWeighted / Math.max(relevant.length, 1));
-}
-
-/** Score marine conditions (0–100) — lower is better for anglers */
+/**
+ * Marine conditions score (0–100) from real Open-Meteo data.
+ * Penalizes high wind and waves; bonuses when water temp suits active species.
+ */
 export function calcMarineScore(conditions: MarineConditions | null, species: Species[]): number {
   if (!conditions) return 50;
 
-  // Wind penalty: calm = great, gusty = bad
   const windPenalty = conditions.windSpeedMph <= 10
     ? 0
     : conditions.windSpeedMph <= 20
     ? (conditions.windSpeedMph - 10) * 3
     : 30 + (conditions.windSpeedMph - 20) * 5;
 
-  // Wave height penalty
   const wavePenalty = conditions.waveHeightFt <= 1
     ? 0
     : conditions.waveHeightFt <= 3
     ? (conditions.waveHeightFt - 1) * 8
     : 16 + (conditions.waveHeightFt - 3) * 12;
 
-  // Water temp bonus: check if any target species prefers this temp
   const tempBonus = species.some(s =>
     conditions.waterTempF >= s.preferredWaterTempF[0] &&
     conditions.waterTempF <= s.preferredWaterTempF[1]
@@ -80,38 +63,106 @@ export function calcMarineScore(conditions: MarineConditions | null, species: Sp
   return Math.max(0, Math.min(100, 80 - windPenalty - wavePenalty + tempBonus));
 }
 
-/** Score fish season (0–100) based on monthly availability */
-export function calcSeasonScore(species: Species[], targetDate: Date): number {
-  const month = targetDate.getMonth(); // 0-indexed
-  const scores = species.map(s => s.monthlyAvailability[month]);
+/**
+ * Season & migration score (0–100).
+ * Uses monthly availability arrays derived from known migration patterns,
+ * then adjusts using real water temperature from Open-Meteo Marine API.
+ * Species outside their preferred temp window are down-scored; those in
+ * their ideal range receive a bonus.
+ */
+export function calcSeasonScore(
+  species: Species[],
+  targetDate: Date,
+  waterTempF?: number | null,
+): number {
+  const month = targetDate.getMonth();
+  const scores = species.map(s => {
+    let base = s.monthlyAvailability[month];
+    if (waterTempF != null) {
+      const [lo, hi] = s.preferredWaterTempF;
+      if (waterTempF < lo - 8 || waterTempF > hi + 8) {
+        base *= 0.50; // well outside range — species absent or lethargic
+      } else if (waterTempF < lo - 3 || waterTempF > hi + 3) {
+        base *= 0.78; // outside range
+      } else if (waterTempF >= lo && waterTempF <= hi) {
+        base = Math.min(100, base * 1.15); // ideal temp band bonus
+      }
+    }
+    return base;
+  });
   if (!scores.length) return 50;
   return scores.reduce((a, b) => a + b, 0) / scores.length;
 }
 
-/** Tide phase bonus: +1 for perfect tide, 0 for neutral, -0.5 for bad */
-export function tideMultiplier(tide: TideInfo | null, species: Species[]): number {
-  if (!tide) return 1.0;
+/**
+ * Tide score (0–100) from real NOAA Tides & Currents predictions.
+ * Phase match with species preferences earns up to 70 pts.
+ * Active tidal movement (incoming/outgoing) adds a 30-pt movement bonus.
+ */
+export function calcTideScore(tide: TideInfo | null, species: Species[]): number {
+  if (!tide) return 50;
   const phases = species.map(s => s.peakTidePhase);
   const matches = phases.filter(p => p === tide.phase || p === 'any').length;
   const ratio = matches / Math.max(phases.length, 1);
-  return 0.85 + ratio * 0.3; // 0.85–1.15 range
+  const phaseScore = ratio * 70;
+  const movementBonus = (tide.phase === 'incoming' || tide.phase === 'outgoing') ? 30 : 15;
+  return Math.min(100, phaseScore + movementBonus);
 }
 
-/** Weighted composite score */
+/**
+ * Moon/solunar score (0–100) — calculated from the lunar cycle, no API needed.
+ * New moon and full moon = gravitational peak = maximum tidal range = best
+ * feeding activity. Quarter moons score lowest (~50).
+ *
+ * Reference new moon: 2000-01-06 18:14 UTC (J2000 epoch alignment).
+ * Synodic period: 29.53058867 days.
+ */
+export function calcMoonScore(date: Date): {
+  score: number;
+  phase: number;
+  phaseName: string;
+  phaseEmoji: string;
+} {
+  const KNOWN_NEW_MOON = new Date('2000-01-06T18:14:00Z').getTime();
+  const SYNODIC_PERIOD = 29.53058867;
+  const msPerDay = 86400000;
+
+  const daysSince = (date.getTime() - KNOWN_NEW_MOON) / msPerDay;
+  const raw = ((daysSince % SYNODIC_PERIOD) + SYNODIC_PERIOD) % SYNODIC_PERIOD;
+  const phase = raw / SYNODIC_PERIOD; // 0 = new, 0.5 = full
+
+  // |cos(2π·phase)| peaks at 0 (new) and 0.5 (full), dips at quarters
+  const score = 50 + Math.abs(Math.cos(Math.PI * 2 * phase)) * 50;
+
+  let phaseName: string;
+  let phaseEmoji: string;
+  if (phase < 0.03 || phase >= 0.97)      { phaseName = 'New Moon';        phaseEmoji = '🌑'; }
+  else if (phase < 0.22)                  { phaseName = 'Waxing Crescent'; phaseEmoji = '🌒'; }
+  else if (phase < 0.28)                  { phaseName = 'First Quarter';   phaseEmoji = '🌓'; }
+  else if (phase < 0.47)                  { phaseName = 'Waxing Gibbous';  phaseEmoji = '🌔'; }
+  else if (phase < 0.53)                  { phaseName = 'Full Moon';       phaseEmoji = '🌕'; }
+  else if (phase < 0.72)                  { phaseName = 'Waning Gibbous';  phaseEmoji = '🌖'; }
+  else if (phase < 0.78)                  { phaseName = 'Last Quarter';    phaseEmoji = '🌗'; }
+  else                                    { phaseName = 'Waning Crescent'; phaseEmoji = '🌘'; }
+
+  return { score, phase, phaseName, phaseEmoji };
+}
+
+/** Weighted composite from four fully-real data sources */
 export function calcZoneScore(params: {
-  biteScore: number;
   marineScore: number;
   seasonScore: number;
-  tideMultiplier: number;
+  tideScore: number;
+  moonScore: number;
 }): number {
   const raw =
-    params.biteScore * 0.40 +
-    params.marineScore * 0.35 +
-    params.seasonScore * 0.25;
-  return Math.max(0, Math.min(100, raw * params.tideMultiplier));
+    params.marineScore * 0.40 +
+    params.seasonScore * 0.35 +
+    params.tideScore  * 0.15 +
+    params.moonScore  * 0.10;
+  return Math.max(0, Math.min(100, raw));
 }
 
-/** Confidence 0–1 based on how far into the future we're forecasting */
 export function calcConfidence(forecastHoursAhead: number): number {
   if (forecastHoursAhead <= 0) return 1.0;
   if (forecastHoursAhead <= 24) return 1.0 - (forecastHoursAhead / 24) * 0.15;

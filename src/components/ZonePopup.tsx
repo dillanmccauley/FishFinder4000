@@ -1,7 +1,6 @@
 import type { ZoneScore, Hotspot } from '../types';
 import { GRADE_COLORS, GRADE_BG_COLORS, GRADE_LABELS, formatTempF, formatWind } from '../utils/scoring';
 import { ConfidenceBadge } from './ConfidenceBadge';
-import { format } from 'date-fns';
 
 const TYPE_ICONS: Record<string, string> = {
   pier: '🎣',
@@ -16,11 +15,6 @@ const TIDE_ICONS: Record<string, string> = {
   outgoing: '↙ Outgoing',
   high: '⬆ High',
   low: '⬇ Low',
-};
-
-const SOURCE_LINKS: Record<string, string> = {
-  'Fishbrain': 'https://fishbrain.com/',
-  'Anglr': 'https://anglr.com/',
 };
 
 interface Props {
@@ -75,9 +69,10 @@ export function ZonePopup({ score, hotspot, onRemove }: Props) {
         <div style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>
           SCORE BREAKDOWN
         </div>
-        <ScoreBar label="Bite Reports" value={score.biteScore} weight="40%" color="#38bdf8" />
-        <ScoreBar label="Marine Conditions" value={score.marineScore} weight="35%" color="#a78bfa" />
-        <ScoreBar label="Fish Season" value={score.seasonScore} weight="25%" color="#4ade80" />
+        <ScoreBar label="Marine Conditions" value={score.marineScore} weight="40%" color="#38bdf8" />
+        <ScoreBar label="Season & Temp" value={score.seasonScore} weight="35%" color="#4ade80" />
+        <ScoreBar label="Tide Phase" value={score.tideScore} weight="15%" color="#a78bfa" />
+        <ScoreBar label="Moon Phase" value={score.moonScore} weight="10%" color="#fbbf24" />
       </div>
 
       {/* Active species */}
@@ -132,47 +127,11 @@ export function ZonePopup({ score, hotspot, onRemove }: Props) {
           <CondRow icon="🌊" label="Waves" value={score.conditions ? `${score.conditions.waveHeightFt.toFixed(1)} ft` : '—'} />
           <CondRow icon="💨" label="Wind" value={score.conditions ? formatWind(score.conditions.windSpeedMph, score.conditions.windDirectionDeg) : '—'} />
           <CondRow icon="🌊" label="Tide" value={score.tide ? TIDE_ICONS[score.tide.phase] ?? score.tide.phase : '—'} />
-          {score.tide && <CondRow icon="⏱" label="Tide Height" value={`${score.tide.heightFt.toFixed(1)} ft`} />}
+          {score.tide && <CondRow icon="📏" label="Tide Height" value={`${score.tide.heightFt.toFixed(1)} ft`} />}
           {score.tide && <CondRow icon="⏰" label="Next Event" value={score.tide.nextEventLabel} />}
+          <CondRow icon={score.moonPhaseEmoji} label="Moon" value={score.moonPhaseName} />
         </div>
       </div>
-
-      {/* Latest report */}
-      {score.topBiteReport && (
-        <div className="px-4 py-3" style={{ borderBottom: '1px solid #334155' }}>
-          <div style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', marginBottom: 6 }}>
-            LATEST REPORT
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {SOURCE_LINKS[score.topBiteReport.source] ? (
-                <a
-                  href={SOURCE_LINKS[score.topBiteReport.source]}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-2 py-0.5 rounded text-xs font-semibold"
-                  style={{ background: '#1e40af20', border: '1px solid #3b82f6', color: '#93c5fd', textDecoration: 'none' }}
-                >
-                  {score.topBiteReport.source} ↗
-                </a>
-              ) : (
-                <span
-                  className="px-2 py-0.5 rounded text-xs font-semibold"
-                  style={{ background: '#1e40af20', border: '1px solid #3b82f6', color: '#93c5fd' }}
-                >
-                  {score.topBiteReport.source}
-                </span>
-              )}
-              {score.topBiteReport.verified && (
-                <span className="text-xs" style={{ color: '#4ade80' }}>✓ Verified</span>
-              )}
-            </div>
-            <span style={{ color: '#64748b', fontSize: '11px' }}>
-              {format(score.topBiteReport.timestamp, 'MMM d, h:mm a')}
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* Resources & links */}
       <div className="px-4 py-3" style={{ borderBottom: onRemove ? '1px solid #334155' : undefined }}>
@@ -212,7 +171,7 @@ function ScoreBar({ label, value, weight, color }: { label: string; value: numbe
     <div className="mb-2">
       <div className="flex justify-between items-center mb-1">
         <span style={{ color: '#cbd5e1', fontSize: '12px' }}>{label}</span>
-        <span style={{ color: '#64748b', fontSize: '11px' }}>{weight} weight · {value.toFixed(0)}</span>
+        <span style={{ color: '#64748b', fontSize: '11px' }}>{weight} · {value.toFixed(0)}</span>
       </div>
       <div style={{ height: 4, background: '#1e293b', borderRadius: 2, overflow: 'hidden' }}>
         <div

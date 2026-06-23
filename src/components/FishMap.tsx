@@ -39,6 +39,7 @@ interface Props {
   userLocation: LatLng;
   zoneScores: Map<string, ZoneScore>;
   customZones: Hotspot[];
+  targetDate: Date;
   onLocationChange: (location: LatLng, label: string) => void;
   onRequestCreateZone: (loc: LatLng) => void;
   onRemoveCustomZone: (id: string) => void;
@@ -49,6 +50,7 @@ export function FishMap({
   userLocation,
   zoneScores,
   customZones,
+  targetDate,
   onLocationChange,
   onRequestCreateZone,
   onRemoveCustomZone,
@@ -223,7 +225,7 @@ export function FishMap({
       <div ref={containerRef} className="w-full h-full" />
       <SearchBar onSelect={(loc, label) => onLocationChange(loc, label)} />
       <Legend visible={legendVisible} onToggle={() => setLegendVisible(v => !v)} />
-      <NearMePanel userLocation={userLocation} zoneScores={zoneScores} />
+      <NearMePanel userLocation={userLocation} zoneScores={zoneScores} targetDate={targetDate} />
 
       {/* Add Zone FAB */}
       <div style={{ position: 'absolute', top: 56, right: 12, zIndex: 9999 }}>

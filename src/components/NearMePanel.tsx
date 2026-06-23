@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { LatLng, ZoneScore } from '../types';
 import { HOTSPOTS, HOTSPOT_MAP } from '../data/hotspots';
-import { GRADE_COLORS, scoreToGrade } from '../utils/scoring';
+import { GRADE_COLORS, scoreToGrade, calcSeasonScore } from '../utils/scoring';
 
 const RADIUS_MI = 25;
 const EARTH_RADIUS_MI = 3958.8;
@@ -20,9 +20,10 @@ function distanceMi(a: LatLng, b: LatLng): number {
 interface Props {
   userLocation: LatLng;
   zoneScores: Map<string, ZoneScore>;
+  targetDate: Date;
 }
 
-export function NearMePanel({ userLocation, zoneScores }: Props) {
+export function NearMePanel({ userLocation, zoneScores, targetDate }: Props) {
   const result = useMemo(() => {
     const nearby = HOTSPOTS.filter(h => distanceMi(userLocation, h.location) <= RADIUS_MI);
     if (!nearby.length) return null;
@@ -37,24 +38,25 @@ export function NearMePanel({ userLocation, zoneScores }: Props) {
     const areaGrade = scoreToGrade(areaScore);
     const bestZone = scores.reduce((b, z) => (z.total > b.total ? z : b), scores[0]);
 
-    // Accumulate per-species bite heat across nearby zones
-    const acc = new Map<string, { commonName: string; totalBite: number; count: number }>();
+    // Per-species season heat averaged across nearby zones
+    const acc = new Map<string, { commonName: string; totalHeat: number; count: number }>();
     scores.forEach(z => {
       z.activeSpecies.forEach(sp => {
-        const prev = acc.get(sp.id) ?? { commonName: sp.commonName, totalBite: 0, count: 0 };
-        prev.totalBite += z.biteScore;
+        const heat = calcSeasonScore([sp], targetDate, z.conditions?.waterTempF);
+        const prev = acc.get(sp.id) ?? { commonName: sp.commonName, totalHeat: 0, count: 0 };
+        prev.totalHeat += heat;
         prev.count += 1;
         acc.set(sp.id, prev);
       });
     });
 
     const topSpecies = [...acc.entries()]
-      .map(([id, v]) => ({ id, commonName: v.commonName, heat: v.totalBite / v.count }))
+      .map(([id, v]) => ({ id, commonName: v.commonName, heat: v.totalHeat / v.count }))
       .sort((a, b) => b.heat - a.heat)
       .slice(0, 4);
 
     return { nearbyCount: nearby.length, areaGrade, bestZone, topSpecies };
-  }, [userLocation, zoneScores]);
+  }, [userLocation, zoneScores, targetDate]);
 
   if (!result) return null;
 
@@ -96,7 +98,7 @@ export function NearMePanel({ userLocation, zoneScores }: Props) {
           </div>
         </div>
 
-        {/* Species bite heat */}
+        {/* Species season heat */}
         <div className="px-3 py-2">
           <div
             style={{
@@ -104,12 +106,12 @@ export function NearMePanel({ userLocation, zoneScores }: Props) {
               textTransform: 'uppercase', letterSpacing: '0.06em',
             }}
           >
-            What&apos;s biting
+            What&apos;s in season
           </div>
           <div className="flex flex-col gap-1.5">
             {topSpecies.map(({ id, commonName, heat }) => {
               const pct = Math.min(100, Math.max(4, heat));
-              const barColor = heat >= 60 ? '#22c55e' : heat >= 40 ? '#fbbf24' : '#475569';
+              const barColor = heat >= 65 ? '#22c55e' : heat >= 40 ? '#fbbf24' : '#475569';
               return (
                 <div key={id} className="flex items-center gap-2">
                   <span style={{ fontSize: 11, color: '#cbd5e1', width: 116, flexShrink: 0 }}>

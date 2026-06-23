@@ -22,21 +22,12 @@ export interface Species {
   id: string;
   name: string;
   commonName: string;
-  /** Monthly availability 0–100 for SE US */
+  /** Monthly availability 0–100, Jan–Dec */
   monthlyAvailability: number[];
   preferredWaterTempF: [number, number];
   topLures: string[];
   topRigs: string[];
   peakTidePhase: 'incoming' | 'outgoing' | 'high' | 'low' | 'any';
-}
-
-export interface BiteReport {
-  hotspotId: string;
-  speciesId: string;
-  intensity: number; // 0–100
-  timestamp: Date;
-  source: string;
-  verified: boolean;
 }
 
 export interface MarineConditions {
@@ -57,16 +48,19 @@ export interface TideInfo {
 
 export interface ZoneScore {
   hotspotId: string;
-  total: number; // 0–100
+  total: number;       // 0–100 composite
   grade: Grade;
-  biteScore: number;
-  marineScore: number;
-  seasonScore: number;
+  marineScore: number; // 40% — wind, waves, sea temp (Open-Meteo)
+  seasonScore: number; // 35% — monthly migration + water-temp adjustment
+  tideScore: number;   // 15% — phase match + tidal movement (NOAA)
+  moonScore: number;   // 10% — lunar phase (new/full = peak)
+  moonPhase: number;   // 0–1 raw (0 = new, 0.5 = full)
+  moonPhaseName: string;
+  moonPhaseEmoji: string;
   activeSpecies: Species[];
   conditions: MarineConditions | null;
   tide: TideInfo | null;
-  topBiteReport: BiteReport | null;
-  confidence: number; // 0–1
+  confidence: number;  // 0–1 forecast confidence decay
   isForecast: boolean;
   forecastHoursAhead: number;
 }
