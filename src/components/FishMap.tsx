@@ -292,7 +292,7 @@ export function FishMap({
     }
   }, [depthLayerVisible]);
 
-  // NOAA RNC nautical chart tile overlay
+  // OpenSeaMap nautical overlay — buoys, lights, depth marks, hazards
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -300,12 +300,13 @@ export function FishMap({
     if (nauticalVisible) {
       if (!nauticalLayerRef.current) {
         nauticalLayerRef.current = L.tileLayer(
-          'https://tileservice.charts.noaa.gov/tiles/50000_1/{z}/{x}/{y}.png',
+          'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
           {
-            attribution: 'Nautical Charts © NOAA',
-            maxNativeZoom: 16,
+            attribution: 'Nautical data © <a href="https://www.openseamap.org">OpenSeaMap</a> contributors',
+            minZoom: 8,
+            maxNativeZoom: 18,
             maxZoom: 19,
-            opacity: 0.85,
+            opacity: 1.0,
           }
         );
       }
@@ -492,10 +493,10 @@ export function FishMap({
           🌊 {depthLayerVisible ? 'Hide Depth' : 'Depth Chart'}
         </button>
 
-        {/* NOAA RNC nautical chart toggle */}
+        {/* OpenSeaMap nautical overlay toggle */}
         <button
           onClick={() => setNauticalVisible(v => !v)}
-          title={nauticalVisible ? 'Hide nautical charts' : 'Show NOAA nautical charts'}
+          title={nauticalVisible ? 'Hide nautical marks' : 'Show nautical marks (buoys, lights, hazards)'}
           style={btnStyle(nauticalVisible, '#0369a1', '#38bdf8')}
         >
           ⚓ {nauticalVisible ? 'Hide Charts' : 'Charts'}
