@@ -15,11 +15,14 @@ import {
   calcPressureScore,
   calcUVScore,
   calcBaitScore,
+  calcDepthScore,
 } from '../utils/scoring';
 
-const GRID_STEP = 0.1;
-const MAX_DEGREES = 1.0;
+const GRID_STEP = 0.02;   // 0.02° ≈ 2km — scoring resolution
+const FETCH_STEP = 0.1;   // 0.1° ≈ 11km — Open-Meteo native resolution
+const MAX_DEGREES = 0.5;  // max bbox side (0.5° × 0.5° = 25 fetch pts, 625 score pts)
 const CONCURRENCY = 8;
+const METERS_TO_FEET = 3.28084;
 
 const NE_SPECIES_IDS = ['striped-bass', 'bluefish', 'summer-flounder', 'weakfish'];
 const SE_SPECIES_IDS = ['red-drum', 'spotted-seatrout', 'flounder', 'snook', 'sheepshead'];
@@ -29,14 +32,33 @@ function speciesForLat(lat: number) {
   return SPECIES.filter(s => ids.includes(s.id));
 }
 
-function generateGrid(bbox: BBox): LatLng[] {
+function roundToStep(val: number, step: number): number {
+  return parseFloat((Math.round(val / step) * step).toFixed(10));
+}
+
+function generateFetchGrid(bbox: BBox): LatLng[] {
   const pts: LatLng[] = [];
   const swLat = Math.min(bbox.sw.lat, bbox.ne.lat);
   const neLat = Math.max(bbox.sw.lat, bbox.ne.lat);
   const swLng = Math.min(bbox.sw.lng, bbox.ne.lng);
   const neLng = Math.max(bbox.sw.lng, bbox.ne.lng);
+  const maxLat = Math.min(neLat, swLat + MAX_DEGREES);
+  const maxLng = Math.min(neLng, swLng + MAX_DEGREES);
 
-  // Clamp to max size
+  for (let lat = swLat; lat <= maxLat + 0.001; lat = Math.round((lat + FETCH_STEP) * 100) / 100) {
+    for (let lng = swLng; lng <= maxLng + 0.001; lng = Math.round((lng + FETCH_STEP) * 100) / 100) {
+      pts.push({ lat: parseFloat(lat.toFixed(2)), lng: parseFloat(lng.toFixed(2)) });
+    }
+  }
+  return pts;
+}
+
+function generateScoringGrid(bbox: BBox): LatLng[] {
+  const pts: LatLng[] = [];
+  const swLat = Math.min(bbox.sw.lat, bbox.ne.lat);
+  const neLat = Math.max(bbox.sw.lat, bbox.ne.lat);
+  const swLng = Math.min(bbox.sw.lng, bbox.ne.lng);
+  const neLng = Math.max(bbox.sw.lng, bbox.ne.lng);
   const maxLat = Math.min(neLat, swLat + MAX_DEGREES);
   const maxLng = Math.min(neLng, swLng + MAX_DEGREES);
 
@@ -73,13 +95,34 @@ function scorePoint(
   getConditionsAt: (loc: LatLng, date: Date) => MarineConditions | null,
   getTideAt: (stationId: string, date: Date) => TideInfo | null,
   targetDate: Date,
+  classifyCell: (lat: number, lng: number) => string | null,
+  getSatSSTAt: (lat: number, lng: number) => number | null,
+  getStructureBonusAt: (lat: number, lng: number) => number,
+  getDepthAt: (lat: number, lng: number) => number | null,
 ): number | null {
   if (!loaded) return null;
-  const conditions = getConditionsAt(pt, targetDate);
+
+  // Skip land and dry/very-shallow cells when bathymetry is available
+  const cellClass = classifyCell(pt.lat, pt.lng);
+  if (cellClass === 'land' || cellClass === 'too-shallow') return null;
+
+  // Look up conditions from nearest 0.1° fetch grid point
+  const fetchLoc: LatLng = {
+    lat: parseFloat(roundToStep(pt.lat, FETCH_STEP).toFixed(2)),
+    lng: parseFloat(roundToStep(pt.lng, FETCH_STEP).toFixed(2)),
+  };
+  let conditions = getConditionsAt(fetchLoc, targetDate);
   if (!conditions) return null;
 
+  // Override Open-Meteo SST with higher-res satellite SST when available
+  const satSSTCelsius = getSatSSTAt(pt.lat, pt.lng);
+  if (satSSTCelsius !== null) {
+    const satSSTF = satSSTCelsius * 9 / 5 + 32;
+    conditions = { ...conditions, waterTempF: satSSTF };
+  }
+
   const prevDate = addHours(targetDate, -3);
-  const prevConditions = getConditionsAt(pt, prevDate);
+  const prevConditions = getConditionsAt(fetchLoc, prevDate);
   const species = speciesForLat(pt.lat);
   const tideStationId = nearestHotspot(pt, HOTSPOTS).tideStationId;
   const tide = getTideAt(tideStationId, targetDate);
@@ -95,7 +138,19 @@ function scorePoint(
   const uvScore = calcUVScore(conditions, species);
   const clarityScore = calcClarityScore(conditions, undefined, targetDate);
 
-  return calcZoneScore({ marineScore, pressureScore, seasonScore, tideScore, moonScore, uvScore, clarityScore });
+  // Depth score from ETOPO1 bathymetry (negative m = below sea level → positive feet)
+  const depthM = getDepthAt(pt.lat, pt.lng);
+  const depthFt = depthM != null ? Math.abs(depthM) * METERS_TO_FEET : null;
+  const depthScore = depthFt != null ? calcDepthScore(depthFt, species) : undefined;
+
+  const composite = calcZoneScore({
+    marineScore, pressureScore, seasonScore, tideScore,
+    moonScore, uvScore, clarityScore, depthScore,
+  });
+
+  // Structure bonus applied additively after composite clamp
+  const structureBonus = getStructureBonusAt(pt.lat, pt.lng);
+  return Math.min(100, composite + structureBonus);
 }
 
 interface RasterForecastResult {
@@ -111,7 +166,11 @@ export function useRasterForecast(
   targetDate: Date,
   getConditionsAt: (loc: LatLng, date: Date) => MarineConditions | null,
   getTideAt: (stationId: string, date: Date) => TideInfo | null,
-  nowDate: Date,
+  _nowDate: Date,
+  classifyCell: (lat: number, lng: number) => string | null,
+  getSatSSTAt: (lat: number, lng: number) => number | null,
+  getStructureBonusAt: (lat: number, lng: number) => number,
+  getDepthAt: (lat: number, lng: number) => number | null,
 ): RasterForecastResult {
   const [loadedSet, setLoadedSet] = useState<Set<string>>(new Set());
   const [pointsLoaded, setPointsLoaded] = useState(0);
@@ -119,11 +178,14 @@ export function useRasterForecast(
   const [loading, setLoading] = useState(false);
   const abortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
 
-  const gridLocs = useMemo(() => (bbox ? generateGrid(bbox) : []), [bbox]);
+  // Coarse grid for Open-Meteo fetches (25 pts max)
+  const fetchLocs = useMemo(() => (bbox ? generateFetchGrid(bbox) : []), [bbox]);
+  // Fine grid for scoring (625 pts max)
+  const scoringLocs = useMemo(() => (bbox ? generateScoringGrid(bbox) : []), [bbox]);
 
-  // Fetch all grid points when bbox changes
+  // Fetch Open-Meteo data at 0.1° resolution when bbox changes
   useEffect(() => {
-    if (!gridLocs.length) {
+    if (!fetchLocs.length) {
       setLoadedSet(new Set());
       setPointsLoaded(0);
       setLoading(false);
@@ -143,11 +205,11 @@ export function useRasterForecast(
     let done = 0;
     let failed = 0;
 
-    const tasks = gridLocs.map(pt => async () => {
+    const tasks = fetchLocs.map(pt => async () => {
       const ok = await fetchGridPoint(pt.lat, pt.lng);
       if (ctrl.cancelled) return;
       if (ok) {
-        newLoaded.add(`${pt.lat.toFixed(4)},${pt.lng.toFixed(4)}`);
+        newLoaded.add(`${pt.lat.toFixed(2)},${pt.lng.toFixed(2)}`);
       } else {
         failed++;
         setPointsFailed(failed);
@@ -162,22 +224,35 @@ export function useRasterForecast(
         setLoading(false);
       }
     });
-  }, [gridLocs]);
+  }, [fetchLocs]);
 
-  // Re-score on targetDate change (reads from cache, no fetches)
+  // Score 0.02° grid from cached conditions — re-runs on targetDate or data changes
   const gridPoints = useMemo<GridPoint[]>(() => {
-    if (!gridLocs.length || !loadedSet.size) return [];
+    if (!scoringLocs.length || !loadedSet.size) return [];
     const pts: GridPoint[] = [];
-    gridLocs.forEach(pt => {
-      const key = `${pt.lat.toFixed(4)},${pt.lng.toFixed(4)}`;
-      const loaded = loadedSet.has(key);
-      const score = scorePoint(pt, loaded, getConditionsAt, getTideAt, targetDate);
+    scoringLocs.forEach(pt => {
+      // Map each fine scoring point to its nearest coarse fetch point
+      const fetchKey = `${roundToStep(pt.lat, FETCH_STEP).toFixed(2)},${roundToStep(pt.lng, FETCH_STEP).toFixed(2)}`;
+      const loaded = loadedSet.has(fetchKey);
+      const score = scorePoint(
+        pt, loaded,
+        getConditionsAt, getTideAt, targetDate,
+        classifyCell, getSatSSTAt, getStructureBonusAt, getDepthAt,
+      );
       if (score !== null) {
         pts.push({ lat: pt.lat, lng: pt.lng, score });
       }
     });
     return pts;
-  }, [gridLocs, loadedSet, targetDate, getConditionsAt, getTideAt, nowDate]);
+  // nowDate omitted from deps: it doesn't affect scoring, only prevents stale display
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoringLocs, loadedSet, targetDate, getConditionsAt, getTideAt, classifyCell, getSatSSTAt, getStructureBonusAt, getDepthAt]);
 
-  return { gridPoints, loading, pointsLoaded, pointsTotal: gridLocs.length, pointsFailed };
+  return {
+    gridPoints,
+    loading,
+    pointsLoaded,
+    pointsTotal: fetchLocs.length,
+    pointsFailed,
+  };
 }

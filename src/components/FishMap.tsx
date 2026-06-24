@@ -13,6 +13,9 @@ import { NearMePanel } from './NearMePanel';
 import { SpotForecastPanel } from './SpotForecastPanel';
 import { useLocationForecast } from '../hooks/useLocationForecast';
 import { useRasterForecast } from '../hooks/useRasterForecast';
+import { useBathymetry } from '../hooks/useBathymetry';
+import { useSatSST } from '../hooks/useSatSST';
+import { useMarineStructure } from '../hooks/useMarineStructure';
 
 const RADIUS_MILES = 25;
 const METERS_PER_MILE = 1609.34;
@@ -73,6 +76,7 @@ export function FishMap({
   const userMarkerRef = useRef<L.Marker | null>(null);
   const popupRootsRef = useRef<Map<string, ReturnType<typeof createRoot>>>(new Map());
   const depthLayerRef = useRef<L.TileLayer | null>(null);
+  const nauticalLayerRef = useRef<L.TileLayer | null>(null);
   const rasterLayerRef = useRef<RasterHeatLayer | null>(null);
   const pinMarkerRef = useRef<L.Marker | null>(null);
   const selectionStartRef = useRef<L.LatLng | null>(null);
@@ -81,6 +85,7 @@ export function FishMap({
   const [legendVisible, setLegendVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [depthLayerVisible, setDepthLayerVisible] = useState(false);
+  const [nauticalVisible, setNauticalVisible] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [rasterBBox, setRasterBBox] = useState<BBox | null>(null);
   const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
@@ -93,13 +98,23 @@ export function FishMap({
     nowDate,
   });
 
+  const { classifyCell, getDepthAt, loading: bathyLoading } = useBathymetry(rasterBBox);
+  const { getSatSSTAt, loading: sstLoading } = useSatSST(rasterBBox);
+  const { getStructureBonusAt, loading: structureLoading } = useMarineStructure(rasterBBox);
+
   const { gridPoints, loading: rasterLoading, pointsLoaded, pointsTotal, pointsFailed } = useRasterForecast(
     rasterBBox,
     targetDate,
     getConditionsAt,
     getTideAt,
     nowDate,
+    classifyCell,
+    getSatSSTAt,
+    getStructureBonusAt,
+    getDepthAt,
   );
+
+  const anyLoading = rasterLoading || bathyLoading || sstLoading || structureLoading;
 
   // Combined hotspot map (regular + custom)
   const allHotspotsMap = useMemo(() => {
@@ -277,6 +292,29 @@ export function FishMap({
     }
   }, [depthLayerVisible]);
 
+  // NOAA RNC nautical chart tile overlay
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (nauticalVisible) {
+      if (!nauticalLayerRef.current) {
+        nauticalLayerRef.current = L.tileLayer(
+          'https://tileservice.charts.noaa.gov/tiles/50000_1/{z}/{x}/{y}.png',
+          {
+            attribution: 'Nautical Charts © NOAA',
+            maxNativeZoom: 16,
+            maxZoom: 19,
+            opacity: 0.85,
+          }
+        );
+      }
+      nauticalLayerRef.current.addTo(map);
+    } else {
+      nauticalLayerRef.current?.remove();
+    }
+  }, [nauticalVisible]);
+
   // Pin marker
   useEffect(() => {
     const map = mapRef.current;
@@ -453,10 +491,19 @@ export function FishMap({
         >
           🌊 {depthLayerVisible ? 'Hide Depth' : 'Depth Chart'}
         </button>
+
+        {/* NOAA RNC nautical chart toggle */}
+        <button
+          onClick={() => setNauticalVisible(v => !v)}
+          title={nauticalVisible ? 'Hide nautical charts' : 'Show NOAA nautical charts'}
+          style={btnStyle(nauticalVisible, '#0369a1', '#38bdf8')}
+        >
+          ⚓ {nauticalVisible ? 'Hide Charts' : 'Charts'}
+        </button>
       </div>
 
       {/* Raster loading progress */}
-      {rasterLoading && (
+      {anyLoading && (
         <div style={{
           position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
           zIndex: 9999, background: '#0f172aee', border: '1px solid #22d3ee44',
@@ -469,12 +516,19 @@ export function FishMap({
             borderTopColor: 'transparent', display: 'inline-block',
             animation: 'spin 0.8s linear infinite',
           }} />
-          Raster: {pointsLoaded} / {pointsTotal} points
+          {rasterLoading
+            ? `Weather: ${pointsLoaded} / ${pointsTotal}`
+            : 'Weather ✓'}
+          {bathyLoading && ' · Depth…'}
+          {!bathyLoading && rasterBBox && ' · Depth ✓'}
+          {sstLoading && ' · SST…'}
+          {!sstLoading && rasterBBox && ' · SST ✓'}
+          {structureLoading && ' · Structure…'}
         </div>
       )}
 
       {/* Failed-fetch warning */}
-      {!rasterLoading && rasterBBox && pointsFailed > 0 && (
+      {!anyLoading && rasterBBox && pointsFailed > 0 && (
         <div style={{
           position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
           zIndex: 9999, background: '#0f172aee', border: '1px solid #f59e0b66',
@@ -516,7 +570,7 @@ export function FishMap({
             </div>
           ))}
           <div style={{ fontSize: 9, color: '#475569', marginTop: 5, borderTop: '1px solid #1e293b', paddingTop: 4 }}>
-            {gridPoints.length} grid pts · 0.1° spacing
+            {gridPoints.length} grid pts · 0.02° spacing
           </div>
         </div>
       )}
@@ -534,7 +588,7 @@ export function FishMap({
           lineHeight: 1.4,
         }}
       >
-        Data: Open-Meteo Marine · NOAA Tides & Currents · NOAA FishWatch
+        Data: Open-Meteo Marine · NOAA Tides · NOAA CoastWatch SST · ETOPO1 Depth · NOAA ENC
       </div>
     </div>
   );

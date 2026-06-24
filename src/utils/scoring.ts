@@ -219,7 +219,30 @@ export function calcBaitScore(targetDate: Date, isNortheast: boolean): number {
   return isNortheast ? ne[month] : se[month];
 }
 
-/** Weighted composite from seven data sources */
+/**
+ * Depth score (0–100) based on how well the actual measured depth matches
+ * the active species' preferred depth ranges (from their depthRangeFt fields).
+ */
+export function calcDepthScore(depthFt: number, species: Species[]): number {
+  if (!species.length) {
+    if (depthFt >= 5 && depthFt <= 150) return 80;
+    if (depthFt >= 1 && depthFt <= 400) return 60;
+    return 30;
+  }
+  const scores = species.map(s => {
+    const [lo, hi] = s.depthRangeFt;
+    if (depthFt >= lo && depthFt <= hi) return 95;
+    const range = Math.max(hi - lo, 1);
+    const dist = Math.min(Math.abs(depthFt - lo), Math.abs(depthFt - hi));
+    if (dist <= range * 0.5) return 75;
+    if (dist <= range * 1.5) return 50;
+    if (dist <= range * 3) return 25;
+    return 10;
+  });
+  return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+}
+
+/** Weighted composite from seven (or eight, with depth) data sources */
 export function calcZoneScore(params: {
   marineScore: number;
   pressureScore: number;
@@ -228,7 +251,22 @@ export function calcZoneScore(params: {
   moonScore: number;
   uvScore: number;
   clarityScore: number;
+  depthScore?: number;
 }): number {
+  if (params.depthScore != null) {
+    // 8-factor weights when depth data is available (raster mode)
+    const raw =
+      params.marineScore   * 0.20 +
+      params.pressureScore * 0.12 +
+      params.seasonScore   * 0.23 +
+      params.tideScore     * 0.15 +
+      params.moonScore     * 0.08 +
+      params.uvScore       * 0.07 +
+      params.clarityScore  * 0.05 +
+      params.depthScore    * 0.10;
+    return Math.max(0, Math.min(100, raw));
+  }
+  // 7-factor original weights (hotspot mode)
   const raw =
     params.marineScore   * 0.28 +
     params.pressureScore * 0.12 +
