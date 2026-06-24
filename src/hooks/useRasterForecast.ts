@@ -32,10 +32,6 @@ function speciesForLat(lat: number) {
   return SPECIES.filter(s => ids.includes(s.id));
 }
 
-function roundToStep(val: number, step: number): number {
-  return parseFloat((Math.round(val / step) * step).toFixed(10));
-}
-
 function generateFetchGrid(bbox: BBox): LatLng[] {
   const pts: LatLng[] = [];
   const swLat = Math.min(bbox.sw.lat, bbox.ne.lat);
@@ -91,7 +87,7 @@ async function runWithConcurrency<T>(
 
 function scorePoint(
   pt: LatLng,
-  loaded: boolean,
+  fetchLoc: LatLng | null,
   getConditionsAt: (loc: LatLng, date: Date) => MarineConditions | null,
   getTideAt: (stationId: string, date: Date) => TideInfo | null,
   targetDate: Date,
@@ -100,17 +96,13 @@ function scorePoint(
   getStructureBonusAt: (lat: number, lng: number) => number,
   getDepthAt: (lat: number, lng: number) => number | null,
 ): number | null {
-  if (!loaded) return null;
+  if (!fetchLoc) return null;
 
   // Skip land and dry/very-shallow cells when bathymetry is available
   const cellClass = classifyCell(pt.lat, pt.lng);
   if (cellClass === 'land' || cellClass === 'too-shallow') return null;
 
-  // Look up conditions from nearest 0.1° fetch grid point
-  const fetchLoc: LatLng = {
-    lat: parseFloat(roundToStep(pt.lat, FETCH_STEP).toFixed(2)),
-    lng: parseFloat(roundToStep(pt.lng, FETCH_STEP).toFixed(2)),
-  };
+  // Conditions come from the nearest loaded 0.1° fetch grid point
   let conditions = getConditionsAt(fetchLoc, targetDate);
   if (!conditions) return null;
 
@@ -226,16 +218,28 @@ export function useRasterForecast(
     });
   }, [fetchLocs]);
 
+  // Only the fetch points that actually loaded — used to anchor each scoring cell
+  const loadedFetchPoints = useMemo<LatLng[]>(
+    () => fetchLocs.filter(p => loadedSet.has(`${p.lat.toFixed(2)},${p.lng.toFixed(2)}`)),
+    [fetchLocs, loadedSet],
+  );
+
   // Score 0.02° grid from cached conditions — re-runs on targetDate or data changes
   const gridPoints = useMemo<GridPoint[]>(() => {
-    if (!scoringLocs.length || !loadedSet.size) return [];
+    if (!scoringLocs.length || !loadedFetchPoints.length) return [];
     const pts: GridPoint[] = [];
     scoringLocs.forEach(pt => {
-      // Map each fine scoring point to its nearest coarse fetch point
-      const fetchKey = `${roundToStep(pt.lat, FETCH_STEP).toFixed(2)},${roundToStep(pt.lng, FETCH_STEP).toFixed(2)}`;
-      const loaded = loadedSet.has(fetchKey);
+      // Anchor each fine scoring point to its nearest LOADED coarse fetch point.
+      // (The fetch grid is anchored at the bbox SW corner, so it is not aligned
+      // to absolute 0.1° multiples — find the nearest by distance, not rounding.)
+      let nearest: LatLng | null = null;
+      let bestDist = Infinity;
+      for (const fp of loadedFetchPoints) {
+        const d = (fp.lat - pt.lat) ** 2 + (fp.lng - pt.lng) ** 2;
+        if (d < bestDist) { bestDist = d; nearest = fp; }
+      }
       const score = scorePoint(
-        pt, loaded,
+        pt, nearest,
         getConditionsAt, getTideAt, targetDate,
         classifyCell, getSatSSTAt, getStructureBonusAt, getDepthAt,
       );
@@ -246,7 +250,7 @@ export function useRasterForecast(
     return pts;
   // nowDate omitted from deps: it doesn't affect scoring, only prevents stale display
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scoringLocs, loadedSet, targetDate, getConditionsAt, getTideAt, classifyCell, getSatSSTAt, getStructureBonusAt, getDepthAt]);
+  }, [scoringLocs, loadedFetchPoints, targetDate, getConditionsAt, getTideAt, classifyCell, getSatSSTAt, getStructureBonusAt, getDepthAt]);
 
   return {
     gridPoints,
