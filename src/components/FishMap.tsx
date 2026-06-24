@@ -6,6 +6,7 @@ import type { BBox, LatLng, ZoneScore, Hotspot, MarineConditions, TideInfo } fro
 import { HOTSPOTS } from '../data/hotspots';
 import { GRADE_COLORS, GRADE_LABELS } from '../utils/scoring';
 import { RasterHeatLayer } from '../utils/rasterHeatLayer';
+import { TileGridLayer, TILE_DEG } from '../utils/tileGridLayer';
 import { ZonePopup } from './ZonePopup';
 import { SearchBar } from './SearchBar';
 import { Legend } from './Legend';
@@ -75,21 +76,16 @@ export function FishMap({
   const circleRef = useRef<L.Circle | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const popupRootsRef = useRef<Map<string, ReturnType<typeof createRoot>>>(new Map());
-  const depthLayerRef = useRef<L.TileLayer | null>(null);
   const nauticalLayerRef = useRef<L.TileLayer | null>(null);
   const rasterLayerRef = useRef<RasterHeatLayer | null>(null);
+  const tileGridLayerRef = useRef<TileGridLayer | null>(null);
   const pinMarkerRef = useRef<L.Marker | null>(null);
-  const selectionStartRef = useRef<L.LatLng | null>(null);
-  const selectionRectRef = useRef<L.Rectangle | null>(null);
 
   const [legendVisible, setLegendVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const [depthLayerVisible, setDepthLayerVisible] = useState(false);
   const [nauticalVisible, setNauticalVisible] = useState(false);
-  const [selectionMode, setSelectionMode] = useState(false);
   const [rasterBBox, setRasterBBox] = useState<BBox | null>(null);
   const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
-  const [boxTooSmall, setBoxTooSmall] = useState(false);
 
   const { hourlyScores } = useLocationForecast({
     pin: pinLocation,
@@ -133,11 +129,22 @@ export function FishMap({
       zoomControl: false,
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© OpenStreetMap contributors © CARTO',
-      subdomains: 'abcd',
-      maxZoom: 19,
-    }).addTo(map);
+    // ESRI World Ocean Base — nautical depth shading, bathymetric contours
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
+      { attribution: 'Tiles © Esri — Esri, GEBCO, NOAA, IHO', maxZoom: 19 }
+    ).addTo(map);
+
+    // ESRI World Ocean Reference — depth soundings, channel labels, chart symbols
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
+      { attribution: '', maxNativeZoom: 13, maxZoom: 19 }
+    ).addTo(map);
+
+    // Tile grid overlay — always visible, click-to-select
+    const tileGrid = new TileGridLayer();
+    tileGrid.addTo(map);
+    tileGridLayerRef.current = tileGrid;
 
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
@@ -147,110 +154,50 @@ export function FishMap({
     return () => {
       map.remove();
       mapRef.current = null;
+      tileGridLayerRef.current = null;
       markersRef.current.clear();
       popupRootsRef.current.forEach(root => {
         try { root.unmount(); } catch (_) {}
       });
       popupRootsRef.current.clear();
-      depthLayerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Map click handler: zone creation mode OR pin drop (not in selection mode)
+  // Map click handler: zone creation OR tile-select + pin drop
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     const handler = (e: L.LeafletMouseEvent) => {
-      if (selectionMode) return; // selection handled via mousedown/up
       const loc = { lat: e.latlng.lat, lng: e.latlng.lng };
       if (isCreating) {
         onRequestCreateZone(loc);
         setIsCreating(false);
-      } else {
-        setPinLocation(loc);
+        return;
       }
+      // Drop pin for spot forecast
+      setPinLocation(loc);
+      // Snap click to the 0.5° tile it falls in and start heatmap
+      const swLat = Math.floor(loc.lat / TILE_DEG) * TILE_DEG;
+      const swLng = Math.floor(loc.lng / TILE_DEG) * TILE_DEG;
+      const tileBBox: BBox = {
+        sw: { lat: swLat, lng: swLng },
+        ne: { lat: swLat + TILE_DEG, lng: swLng + TILE_DEG },
+      };
+      setRasterBBox(tileBBox);
+      tileGridLayerRef.current?.setSelectedTile(tileBBox);
     };
 
     map.on('click', handler);
     return () => { map.off('click', handler); };
-  }, [isCreating, selectionMode, onRequestCreateZone]);
+  }, [isCreating, onRequestCreateZone]);
 
   // Cursor style
   useEffect(() => {
     if (!containerRef.current) return;
-    containerRef.current.style.cursor = (isCreating || selectionMode) ? 'crosshair' : '';
-  }, [isCreating, selectionMode]);
-
-  // Rectangle selection drawing
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    if (!selectionMode) return;
-
-    const onMouseDown = (e: L.LeafletMouseEvent) => {
-      L.DomEvent.stopPropagation(e);
-      selectionStartRef.current = e.latlng;
-      map.dragging.disable();
-
-      // Create preview rectangle
-      selectionRectRef.current?.remove();
-      selectionRectRef.current = L.rectangle(
-        L.latLngBounds(e.latlng, e.latlng),
-        { color: '#22d3ee', weight: 2, fillOpacity: 0.08, dashArray: '6 4' }
-      ).addTo(map);
-    };
-
-    const onMouseMove = (e: L.LeafletMouseEvent) => {
-      if (!selectionStartRef.current || !selectionRectRef.current) return;
-      selectionRectRef.current.setBounds(L.latLngBounds(selectionStartRef.current, e.latlng));
-    };
-
-    const onMouseUp = (e: L.LeafletMouseEvent) => {
-      if (!selectionStartRef.current) return;
-      map.dragging.enable();
-
-      const sw = selectionStartRef.current;
-      const ne = e.latlng;
-      selectionStartRef.current = null;
-      selectionRectRef.current?.remove();
-      selectionRectRef.current = null;
-
-      const minLat = Math.min(sw.lat, ne.lat);
-      const maxLat = Math.max(sw.lat, ne.lat);
-      const minLng = Math.min(sw.lng, ne.lng);
-      const maxLng = Math.max(sw.lng, ne.lng);
-
-      // Need at least 0.15° in each dimension to get ≥ 2 grid rows and columns at 0.1° step
-      if (maxLat - minLat < 0.15 || maxLng - minLng < 0.15) {
-        setSelectionMode(false);
-        setBoxTooSmall(true);
-        setTimeout(() => setBoxTooSmall(false), 2500);
-        return;
-      }
-
-      setRasterBBox({
-        sw: { lat: minLat, lng: minLng },
-        ne: { lat: maxLat, lng: maxLng },
-      });
-      setSelectionMode(false);
-    };
-
-    map.on('mousedown', onMouseDown);
-    map.on('mousemove', onMouseMove);
-    map.on('mouseup', onMouseUp);
-
-    return () => {
-      map.off('mousedown', onMouseDown);
-      map.off('mousemove', onMouseMove);
-      map.off('mouseup', onMouseUp);
-      map.dragging.enable();
-      selectionRectRef.current?.remove();
-      selectionRectRef.current = null;
-      selectionStartRef.current = null;
-    };
-  }, [selectionMode]);
+    containerRef.current.style.cursor = isCreating ? 'crosshair' : '';
+  }, [isCreating]);
 
   // Raster heat layer — update when gridPoints or bbox changes
   useEffect(() => {
@@ -268,29 +215,6 @@ export function FishMap({
       rasterLayerRef.current = null;
     }
   }, [gridPoints, rasterBBox]);
-
-  // ESRI Ocean Reference depth tile overlay
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    if (depthLayerVisible) {
-      if (!depthLayerRef.current) {
-        depthLayerRef.current = L.tileLayer(
-          'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
-          {
-            attribution: 'Depth data © Esri, GEBCO, NOAA',
-            maxNativeZoom: 13,
-            maxZoom: 19,
-            opacity: 0.8,
-          }
-        );
-      }
-      depthLayerRef.current.addTo(map);
-    } else {
-      depthLayerRef.current?.remove();
-    }
-  }, [depthLayerVisible]);
 
   // OpenSeaMap nautical overlay — buoys, lights, depth marks, hazards
   useEffect(() => {
@@ -432,6 +356,7 @@ export function FishMap({
     rasterLayerRef.current?.remove();
     rasterLayerRef.current = null;
     setRasterBBox(null);
+    tileGridLayerRef.current?.setSelectedTile(null);
   };
 
   return (
@@ -456,7 +381,7 @@ export function FishMap({
 
         {/* Add Zone */}
         <button
-          onClick={() => { setSelectionMode(false); setIsCreating(v => !v); }}
+          onClick={() => { setIsCreating(v => !v); }}
           title={isCreating ? 'Cancel' : 'Add custom zone'}
           style={btnStyle(isCreating, '#0ea5e9', '#38bdf8')}
         >
@@ -464,18 +389,8 @@ export function FishMap({
         </button>
         {isCreating && <HintPill>Click map to place zone</HintPill>}
 
-        {/* Select Area for raster heatmap */}
-        <button
-          onClick={() => { setIsCreating(false); setSelectionMode(v => !v); }}
-          title={selectionMode ? 'Cancel selection' : 'Draw area for fishing heatmap'}
-          style={btnStyle(selectionMode, '#22d3ee', '#22d3ee')}
-        >
-          {selectionMode ? '✕ Cancel' : '🗺 Select Area'}
-        </button>
-        {selectionMode && <HintPill>Click & drag to draw selection</HintPill>}
-
         {/* Clear raster */}
-        {rasterBBox && !rasterLoading && (
+        {rasterBBox && !anyLoading && (
           <button
             onClick={clearRaster}
             style={btnStyle(false, '#ef4444', '#f87171')}
@@ -483,15 +398,6 @@ export function FishMap({
             ✕ Clear Raster
           </button>
         )}
-
-        {/* Depth chart toggle */}
-        <button
-          onClick={() => setDepthLayerVisible(v => !v)}
-          title={depthLayerVisible ? 'Hide depth chart' : 'Show ocean depth chart'}
-          style={btnStyle(depthLayerVisible, '#6366f1', '#a5b4fc')}
-        >
-          🌊 {depthLayerVisible ? 'Hide Depth' : 'Depth Chart'}
-        </button>
 
         {/* OpenSeaMap nautical overlay toggle */}
         <button
@@ -541,19 +447,6 @@ export function FishMap({
         </div>
       )}
 
-      {/* Box too small hint */}
-      {boxTooSmall && (
-        <div style={{
-          position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
-          zIndex: 9999, background: '#0f172aee', border: '1px solid #f59e0b66',
-          borderRadius: 8, padding: '6px 14px',
-          fontSize: 12, color: '#f59e0b', backdropFilter: 'blur(8px)',
-          whiteSpace: 'nowrap',
-        }}>
-          Draw a larger area (min ~10 mi)
-        </div>
-      )}
-
       {/* Raster legend */}
       {(rasterBBox && gridPoints.length > 0) && (
         <div style={{
@@ -571,7 +464,7 @@ export function FishMap({
             </div>
           ))}
           <div style={{ fontSize: 9, color: '#475569', marginTop: 5, borderTop: '1px solid #1e293b', paddingTop: 4 }}>
-            {gridPoints.length} grid pts · 0.02° spacing
+            {gridPoints.length} scored cells · click tile to change
           </div>
         </div>
       )}
@@ -589,7 +482,7 @@ export function FishMap({
           lineHeight: 1.4,
         }}
       >
-        Data: Open-Meteo Marine · NOAA Tides · NOAA CoastWatch SST · ETOPO1 Depth · NOAA ENC
+        Data: Open-Meteo · NOAA Tides · CoastWatch SST · ETOPO1 · NOAA ENC · Esri Ocean
       </div>
     </div>
   );
