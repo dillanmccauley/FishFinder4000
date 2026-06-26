@@ -130,9 +130,10 @@ export function FishMap({
     });
 
     // ESRI Ocean — nautical depth shading + bathymetric contours
+    // maxNativeZoom caps real tile requests; Leaflet upscales deeper zooms so the map never goes blank
     L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
-      { attribution: 'Tiles &copy; Esri &mdash; Source: Esri, GEBCO, NOAA', maxZoom: 19 }
+      { attribution: 'Tiles &copy; Esri &mdash; Source: Esri, GEBCO, NOAA', maxNativeZoom: 16, maxZoom: 19 }
     ).addTo(map);
     // ESRI Ocean Reference — depth soundings, channel markers, chart labels
     L.tileLayer(
