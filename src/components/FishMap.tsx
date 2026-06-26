@@ -129,10 +129,15 @@ export function FishMap({
       zoomControl: false,
     });
 
-    // NOAA ENC Online — electronic navigational charts (ICW, inlets, soundings, aids to navigation)
+    // ESRI Ocean — nautical depth shading + bathymetric contours
     L.tileLayer(
-      'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/tile/{z}/{y}/{x}',
-      { attribution: 'NOAA Electronic Navigational Charts — <a href="https://nauticalcharts.noaa.gov">nauticalcharts.noaa.gov</a>', maxZoom: 19, maxNativeZoom: 17 }
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
+      { attribution: 'Tiles &copy; Esri &mdash; Source: Esri, GEBCO, NOAA', maxZoom: 19 }
+    ).addTo(map);
+    // ESRI Ocean Reference — depth soundings, channel markers, chart labels
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
+      { attribution: '', maxNativeZoom: 13, maxZoom: 19 }
     ).addTo(map);
 
     // Tile grid overlay — always visible, click-to-select
@@ -150,10 +155,9 @@ export function FishMap({
       mapRef.current = null;
       tileGridLayerRef.current = null;
       markersRef.current.clear();
-      popupRootsRef.current.forEach(root => {
-        try { root.unmount(); } catch (_) {}
-      });
+      const roots = [...popupRootsRef.current.values()];
       popupRootsRef.current.clear();
+      setTimeout(() => roots.forEach(r => { try { r.unmount(); } catch (_) {} }), 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -292,8 +296,9 @@ export function FishMap({
       if (!allHotspotsMap.has(id)) {
         marker.remove();
         markersRef.current.delete(id);
-        popupRootsRef.current.get(id)?.unmount();
+        const root = popupRootsRef.current.get(id);
         popupRootsRef.current.delete(id);
+        if (root) setTimeout(() => { try { root.unmount(); } catch (_) {} }, 0);
       }
     });
 
