@@ -129,16 +129,10 @@ export function FishMap({
       zoomControl: false,
     });
 
-    // ESRI World Ocean Base — nautical depth shading, bathymetric contours
+    // NOAA Seamless RNC — official NOAA nautical charts (ICW, inlets, soundings, aids to navigation)
     L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
-      { attribution: 'Tiles © Esri — Esri, GEBCO, NOAA, IHO', maxZoom: 19 }
-    ).addTo(map);
-
-    // ESRI World Ocean Reference — depth soundings, channel labels, chart symbols
-    L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}',
-      { attribution: '', maxNativeZoom: 13, maxZoom: 19 }
+      'https://seamlessrnc.nauticalcharts.noaa.gov/arcgis/rest/services/RNC/NOAA_RNC/ImageServer/tile/{z}/{y}/{x}',
+      { attribution: 'NOAA Nautical Charts — <a href="https://nauticalcharts.noaa.gov">nauticalcharts.noaa.gov</a>', maxZoom: 19 }
     ).addTo(map);
 
     // Tile grid overlay — always visible, click-to-select
