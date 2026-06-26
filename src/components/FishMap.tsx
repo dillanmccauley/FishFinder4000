@@ -129,10 +129,10 @@ export function FishMap({
       zoomControl: false,
     });
 
-    // NOAA Seamless RNC — official NOAA nautical charts (ICW, inlets, soundings, aids to navigation)
+    // NOAA ENC Online — electronic navigational charts (ICW, inlets, soundings, aids to navigation)
     L.tileLayer(
-      'https://seamlessrnc.nauticalcharts.noaa.gov/arcgis/rest/services/RNC/NOAA_RNC/ImageServer/tile/{z}/{y}/{x}',
-      { attribution: 'NOAA Nautical Charts — <a href="https://nauticalcharts.noaa.gov">nauticalcharts.noaa.gov</a>', maxZoom: 19 }
+      'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/ENCOnline/MapServer/tile/{z}/{y}/{x}',
+      { attribution: 'NOAA Electronic Navigational Charts — <a href="https://nauticalcharts.noaa.gov">nauticalcharts.noaa.gov</a>', maxZoom: 19, maxNativeZoom: 17 }
     ).addTo(map);
 
     // Tile grid overlay — always visible, click-to-select
