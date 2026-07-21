@@ -97,6 +97,30 @@ export const SPECIES: Species[] = [
     topRigs: ['Free-line live bait', 'Crab on circle hook', 'Streamer fly (fly rod)'],
     peakTidePhase: 'outgoing',
   },
+  {
+    id: 'pompano',
+    name: 'Trachinotus carolinus',
+    commonName: 'Florida Pompano',
+    monthlyAvailability: [10, 10, 20, 40, 70, 85, 90, 90, 85, 60, 25, 10],
+    preferredWaterTempF: [65, 85],
+    depthRangeFt: [1, 30],
+    clarityPreference: 60, // sight-feeds on crustaceans in the surf wash
+    topLures: ['Sand flea', 'Fresh shrimp', 'Pompano jig (banana)', 'Fishbites'],
+    topRigs: ['Double-drop pompano rig', 'Carolina rig w/ sand flea', 'Small jig hopped in surf'],
+    peakTidePhase: 'incoming',
+  },
+  {
+    id: 'whiting',
+    name: 'Menticirrhus americanus',
+    commonName: 'Whiting (Sea Mullet)',
+    monthlyAvailability: [40, 45, 65, 80, 85, 75, 65, 65, 75, 85, 75, 55],
+    preferredWaterTempF: [55, 80],
+    depthRangeFt: [2, 40],
+    clarityPreference: 25, // bottom feeder with chin barbel — hunts by feel
+    topLures: ['Fresh shrimp', 'Bloodworms', 'Fishbites bloodworm', 'Squid strip'],
+    topRigs: ['Two-hook bottom rig', 'Fish-finder rig', 'Small Carolina rig'],
+    peakTidePhase: 'incoming',
+  },
   // Northeast species
   {
     id: 'striped-bass',

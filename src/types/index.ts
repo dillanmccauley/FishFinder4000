@@ -116,3 +116,18 @@ export interface GridPoint {
   lng: number;
   score: number;
 }
+
+/** A discrete fishing spot candidate discovered from high-res bathymetry or chart data */
+export interface SpotCandidate {
+  id: string;
+  lat: number;
+  lng: number;
+  kind: 'hole' | 'ledge' | 'reef';
+  /** Approx. water depth at the spot in feet (relative to ~sea level) */
+  depthFt: number;
+  /** How much deeper than the surrounding bottom (holes) or drop magnitude (ledges), feet */
+  reliefFt: number;
+  /** Static structure quality 0–100 — does not change with conditions */
+  structureScore: number;
+  description: string;
+}

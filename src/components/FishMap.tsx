@@ -12,11 +12,63 @@ import { SearchBar } from './SearchBar';
 import { Legend } from './Legend';
 import { NearMePanel } from './NearMePanel';
 import { SpotForecastPanel } from './SpotForecastPanel';
+import { OIBPanel } from './OIBPanel';
 import { useLocationForecast } from '../hooks/useLocationForecast';
 import { useRasterForecast } from '../hooks/useRasterForecast';
 import { useBathymetry } from '../hooks/useBathymetry';
 import { useSatSST } from '../hooks/useSatSST';
 import { useMarineStructure } from '../hooks/useMarineStructure';
+import { useOIBDem } from '../hooks/useOIBDem';
+import { useOIBStructures } from '../hooks/useOIBStructures';
+import { useOIBForecast, type SpeciesOutlook } from '../hooks/useOIBForecast';
+import { DepthShadeLayer } from '../utils/depthShadeLayer';
+import { OIB_CENTER } from '../data/oibConfig';
+import type { SpotCandidate } from '../types';
+
+const SPOT_KIND_COLOR: Record<SpotCandidate['kind'], string> = {
+  hole: '#22d3ee',
+  ledge: '#a78bfa',
+  reef: '#f59e0b',
+};
+
+const SPOT_KIND_LABEL: Record<SpotCandidate['kind'], string> = {
+  hole: 'Hole',
+  ledge: 'Drop-off',
+  reef: 'Artificial Reef',
+};
+
+/** Plain-HTML popup for a discovered spot: structure info + best species right now */
+function spotPopupHtml(spot: SpotCandidate, outlooks: SpeciesOutlook[]): string {
+  const color = SPOT_KIND_COLOR[spot.kind];
+  const ranked = outlooks
+    .map(o => ({ o, fit: o.scoreNow * (o.profile.structureAffinity[spot.kind] ?? 0.3) }))
+    .sort((a, b) => b.fit - a.fit)
+    .slice(0, 3);
+
+  const speciesRows = ranked
+    .map(({ o }) => {
+      const gradeColor = GRADE_COLORS[o.gradeNow];
+      return `<div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;background:${gradeColor};color:#fff;font-size:10px;font-weight:800;">${o.gradeNow}</span>
+        <span style="color:#e2e8f0;font-size:11px;">${o.species.commonName}</span>
+        <span style="color:${gradeColor};font-size:11px;font-weight:700;margin-left:auto;">${o.scoreNow}</span>
+      </div>`;
+    })
+    .join('');
+
+  return `<div style="padding:12px 14px;min-width:260px;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="width:12px;height:12px;background:${color};transform:rotate(45deg);display:inline-block;flex-shrink:0;"></span>
+      <span style="color:#f1f5f9;font-weight:800;font-size:13px;">${SPOT_KIND_LABEL[spot.kind]}</span>
+      <span style="color:${color};font-size:11px;font-weight:700;margin-left:auto;">structure ${spot.structureScore}</span>
+    </div>
+    <div style="color:#94a3b8;font-size:11px;margin-top:6px;line-height:1.5;">${spot.description}</div>
+    ${speciesRows ? `<div style="border-top:1px solid #334155;margin-top:8px;padding-top:6px;">
+      <div style="color:#64748b;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;">Best bets at this structure</div>
+      ${speciesRows}
+    </div>` : ''}
+  </div>`;
+}
 
 const RADIUS_MILES = 25;
 const METERS_PER_MILE = 1609.34;
@@ -80,12 +132,16 @@ export function FishMap({
   const rasterLayerRef = useRef<RasterHeatLayer | null>(null);
   const tileGridLayerRef = useRef<TileGridLayer | null>(null);
   const pinMarkerRef = useRef<L.Marker | null>(null);
+  const depthLayerRef = useRef<DepthShadeLayer | null>(null);
+  const spotMarkersRef = useRef<L.Marker[]>([]);
+  const wasOibModeRef = useRef(false);
 
   const [legendVisible, setLegendVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [nauticalVisible, setNauticalVisible] = useState(false);
   const [rasterBBox, setRasterBBox] = useState<BBox | null>(null);
   const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
+  const [oibMode, setOibMode] = useState(false);
 
   const { hourlyScores } = useLocationForecast({
     pin: pinLocation,
@@ -111,6 +167,12 @@ export function FishMap({
   );
 
   const anyLoading = rasterLoading || bathyLoading || sstLoading || structureLoading;
+
+  // Ocean Isle Beach hyper-local mode
+  const { dem, spots: demSpots, loading: demLoading, error: demError } = useOIBDem(oibMode);
+  const { reefSpots } = useOIBStructures(oibMode);
+  const oibForecast = useOIBForecast(oibMode, targetDate, nowDate);
+  const allSpots = useMemo(() => [...demSpots, ...reefSpots], [demSpots, reefSpots]);
 
   // Combined hotspot map (regular + custom)
   const allHotspotsMap = useMemo(() => {
@@ -175,6 +237,8 @@ export function FishMap({
         setIsCreating(false);
         return;
       }
+      // In OIB mode the depth layer + spot markers own the map — no tile raster or pin
+      if (oibMode) return;
       // Drop pin for spot forecast
       setPinLocation(loc);
       // Snap click to the 0.5° tile it falls in and start heatmap
@@ -190,7 +254,66 @@ export function FishMap({
 
     map.on('click', handler);
     return () => { map.off('click', handler); };
-  }, [isCreating, onRequestCreateZone]);
+  }, [isCreating, onRequestCreateZone, oibMode]);
+
+  // OIB mode: fly to the area on entry
+  useEffect(() => {
+    if (oibMode && !wasOibModeRef.current) {
+      mapRef.current?.flyTo([OIB_CENTER.lat, OIB_CENTER.lng], 12, { duration: 1.5 });
+    }
+    wasOibModeRef.current = oibMode;
+  }, [oibMode]);
+
+  // OIB depth-shade layer
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (oibMode) {
+      if (!depthLayerRef.current) {
+        depthLayerRef.current = new DepthShadeLayer();
+        depthLayerRef.current.addTo(map);
+      }
+      depthLayerRef.current.setDem(dem);
+    } else {
+      depthLayerRef.current?.remove();
+      depthLayerRef.current = null;
+    }
+  }, [oibMode, dem]);
+
+  // OIB spot markers — created when spots load (static seafloor data)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    spotMarkersRef.current.forEach(m => m.remove());
+    spotMarkersRef.current = [];
+
+    if (!oibMode) return;
+
+    allSpots.forEach(spot => {
+      const color = SPOT_KIND_COLOR[spot.kind];
+      const size = spot.structureScore >= 80 ? 16 : 13;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="width:${size}px;height:${size}px;background:${color};transform:rotate(45deg);border:2px solid #0f172a;box-shadow:0 0 8px ${color}aa;"></div>`,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+      });
+      const marker = L.marker([spot.lat, spot.lng], { icon })
+        .bindPopup('', { maxWidth: 300 })
+        .addTo(map);
+      spotMarkersRef.current.push(marker);
+    });
+  }, [oibMode, allSpots]);
+
+  // Refresh spot popup content when the forecast changes — setContent keeps open popups open
+  useEffect(() => {
+    if (!oibMode) return;
+    spotMarkersRef.current.forEach((marker, i) => {
+      const spot = allSpots[i];
+      if (spot) marker.getPopup()?.setContent(spotPopupHtml(spot, oibForecast.outlooks));
+    });
+  }, [oibMode, allSpots, oibForecast.outlooks]);
 
   // Cursor style
   useEffect(() => {
@@ -364,10 +487,10 @@ export function FishMap({
       <div ref={containerRef} className="w-full h-full" />
       <SearchBar onSelect={(loc, label) => onLocationChange(loc, label)} />
       <Legend visible={legendVisible} onToggle={() => setLegendVisible(v => !v)} />
-      <NearMePanel userLocation={userLocation} zoneScores={zoneScores} targetDate={targetDate} />
+      {!oibMode && <NearMePanel userLocation={userLocation} zoneScores={zoneScores} targetDate={targetDate} />}
 
       {/* Spot forecast panel */}
-      {pinLocation && (
+      {pinLocation && !oibMode && (
         <SpotForecastPanel
           pin={pinLocation}
           hourlyScores={hourlyScores}
@@ -376,8 +499,32 @@ export function FishMap({
         />
       )}
 
-      {/* Map control buttons */}
-      <div style={{ position: 'absolute', top: 56, right: 12, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {/* Ocean Isle Beach species panel */}
+      {oibMode && (
+        <OIBPanel
+          outlooks={oibForecast.outlooks}
+          loading={oibForecast.loading}
+          waterTempNowF={oibForecast.waterTempNowF}
+          buoyBiasF={oibForecast.buoyBiasF}
+          targetDate={targetDate}
+          nowDate={nowDate}
+          demStatus={demLoading ? 'loading' : demError ? 'error' : 'ready'}
+          spotCount={allSpots.length}
+          onClose={() => setOibMode(false)}
+        />
+      )}
+
+      {/* Map control buttons — shift left of the OIB panel when it's open */}
+      <div style={{ position: 'absolute', top: 56, right: oibMode ? 312 : 12, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 6 }}>
+
+        {/* Ocean Isle Beach mode */}
+        <button
+          onClick={() => setOibMode(v => !v)}
+          title={oibMode ? 'Exit Ocean Isle Beach mode' : 'Ocean Isle Beach: structure spots + per-species bite windows'}
+          style={btnStyle(oibMode, '#f59e0b', '#fbbf24')}
+        >
+          🎯 {oibMode ? 'Exit OIB' : 'OIB Mode'}
+        </button>
 
         {/* Add Zone */}
         <button
@@ -482,7 +629,7 @@ export function FishMap({
           lineHeight: 1.4,
         }}
       >
-        Data: Open-Meteo · NOAA Tides · CoastWatch SST · ETOPO1 · NOAA ENC · Esri Ocean
+        Data: Open-Meteo · NOAA Tides · CoastWatch SST · ETOPO1 · NOAA ENC · Esri Ocean{oibMode && ' · NCEI CUDEM · CORMP buoys · NOAA reefs'}
       </div>
     </div>
   );
