@@ -133,6 +133,7 @@ export function FishMap({
   const tileGridLayerRef = useRef<TileGridLayer | null>(null);
   const pinMarkerRef = useRef<L.Marker | null>(null);
   const depthLayerRef = useRef<DepthShadeLayer | null>(null);
+  const osmLayerRef = useRef<L.TileLayer | null>(null);
   const spotMarkersRef = useRef<L.Marker[]>([]);
   const wasOibModeRef = useRef(false);
 
@@ -142,6 +143,7 @@ export function FishMap({
   const [rasterBBox, setRasterBBox] = useState<BBox | null>(null);
   const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
   const [oibMode, setOibMode] = useState(false);
+  const [depthVisible, setDepthVisible] = useState(true);
 
   const { hourlyScores } = useLocationForecast({
     pin: pinLocation,
@@ -264,11 +266,29 @@ export function FishMap({
     wasOibModeRef.current = oibMode;
   }, [oibMode]);
 
-  // OIB depth-shade layer
+  // OIB street-detail basemap — the Esri Ocean base has almost no land detail at
+  // high zoom, so overlay OSM (streets, canals, marinas) while in OIB mode
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (oibMode) {
+      if (!osmLayerRef.current) {
+        osmLayerRef.current = L.tileLayer(
+          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          { attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxZoom: 19 }
+        );
+      }
+      osmLayerRef.current.addTo(map);
+    } else {
+      osmLayerRef.current?.remove();
+    }
+  }, [oibMode]);
+
+  // OIB depth-shade layer
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (oibMode && depthVisible) {
       if (!depthLayerRef.current) {
         depthLayerRef.current = new DepthShadeLayer();
         depthLayerRef.current.addTo(map);
@@ -278,7 +298,7 @@ export function FishMap({
       depthLayerRef.current?.remove();
       depthLayerRef.current = null;
     }
-  }, [oibMode, dem]);
+  }, [oibMode, dem, depthVisible]);
 
   // OIB spot markers — created when spots load (static seafloor data)
   useEffect(() => {
@@ -525,6 +545,17 @@ export function FishMap({
         >
           🎯 {oibMode ? 'Exit OIB' : 'OIB Mode'}
         </button>
+
+        {/* Depth shade toggle (OIB mode only) */}
+        {oibMode && (
+          <button
+            onClick={() => setDepthVisible(v => !v)}
+            title={depthVisible ? 'Hide depth shading to see the street map' : 'Show depth shading'}
+            style={btnStyle(depthVisible, '#0e7490', '#22d3ee')}
+          >
+            🌊 {depthVisible ? 'Depth On' : 'Depth Off'}
+          </button>
+        )}
 
         {/* Add Zone */}
         <button

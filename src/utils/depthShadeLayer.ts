@@ -3,7 +3,8 @@ import type { DemGrid } from './spotDiscovery';
 
 const M_TO_FT = 3.28084;
 const RESOLUTION = 2;
-const ALPHA = Math.round(0.82 * 255);
+// Translucent so the street/land basemap stays readable underneath
+const ALPHA = Math.round(0.55 * 255);
 
 /** Depth palette: light shallows → deep navy (feet) */
 const DEPTH_STOPS: { d: number; r: number; g: number; b: number }[] = [
