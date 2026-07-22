@@ -66,16 +66,30 @@ async function fetchDem(): Promise<{ dem: DemGrid; spots: SpotCandidate[] }> {
         elev[i] = Number.isFinite(v) && Math.abs(v) < 12000 ? v : NaN;
       }
 
+      // exportImage snaps the raster to the source pixel grid, so the actual
+      // extent can differ from the requested bbox by a fraction of a cell —
+      // enough to visibly misregister the overlay at high zoom. Read the true
+      // extent from the GeoTIFF's own georeferencing tags when available.
+      let west = sw.lng, east = ne.lng, south = sw.lat, north = ne.lat;
+      try {
+        const bb = img.getBoundingBox(); // [minX, minY, maxX, maxY] in image CRS
+        const plausible =
+          Array.isArray(bb) && bb.length === 4 && bb.every(v => Number.isFinite(v)) &&
+          Math.abs(bb[0] - sw.lng) < 0.05 && Math.abs(bb[1] - sw.lat) < 0.05 &&
+          Math.abs(bb[2] - ne.lng) < 0.05 && Math.abs(bb[3] - ne.lat) < 0.05;
+        if (plausible) { west = bb[0]; south = bb[1]; east = bb[2]; north = bb[3]; }
+      } catch { /* keep the requested bbox */ }
+
       const dem: DemGrid = {
         elev,
         ncols: width,
         nrows: height,
-        west: sw.lng,
-        east: ne.lng,
-        south: sw.lat,
-        north: ne.lat,
-        cellLngDeg: (ne.lng - sw.lng) / width,
-        cellLatDeg: (ne.lat - sw.lat) / height,
+        west,
+        east,
+        south,
+        north,
+        cellLngDeg: (east - west) / width,
+        cellLatDeg: (north - south) / height,
       };
 
       // Sanity check: the box is mostly ocean — demand a real share of water cells
