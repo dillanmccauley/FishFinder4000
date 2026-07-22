@@ -1,14 +1,17 @@
 import { format } from 'date-fns';
-import type { SpeciesOutlook } from '../hooks/useOIBForecast';
+import type { SpeciesOutlook } from '../hooks/useRegionForecast';
 import type { SpotCandidate } from '../types';
+import type { FishingRegion } from '../data/regions';
 import { GRADE_COLORS } from '../utils/scoring';
 import { SPOT_KIND_COLOR, SPOT_KIND_LABEL } from '../utils/spotDiscovery';
 
 interface Props {
+  region: FishingRegion;
   outlooks: SpeciesOutlook[];
   loading: boolean;
   waterTempNowF: number | null;
   buoyBiasF: number;
+  buoyStation: string | null;
   targetDate: Date;
   nowDate: Date;
   demStatus: 'loading' | 'ready' | 'error';
@@ -86,7 +89,7 @@ function DriversLine({ outlook }: { outlook: SpeciesOutlook }) {
   );
 }
 
-export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDate, nowDate, demStatus, spotCount, selectedSpeciesId, onSelectSpecies, bestSpots, onFocusSpot, onClose }: Props) {
+export function RegionPanel({ region, outlooks, loading, waterTempNowF, buoyBiasF, buoyStation, targetDate, nowDate, demStatus, spotCount, selectedSpeciesId, onSelectSpecies, bestSpots, onFocusSpot, onClose }: Props) {
   // The heatmap tracks the top-ranked species until one is explicitly selected
   const effectiveSelectedId = selectedSpeciesId ?? outlooks[0]?.species.id ?? null;
 
@@ -100,11 +103,11 @@ export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDa
       {/* Header */}
       <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid #1e293b', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontWeight: 800, fontSize: 13, color: '#f1f5f9' }}>🎯 Ocean Isle Beach</span>
+          <span style={{ fontWeight: 800, fontSize: 13, color: '#f1f5f9' }}>🎯 {region.name}</span>
           <button
             onClick={onClose}
             style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14, padding: 2 }}
-            title="Exit OIB mode"
+            title="Exit local mode"
           >
             ✕
           </button>
@@ -112,11 +115,11 @@ export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDa
         <div style={{ fontSize: 10, color: '#64748b', marginTop: 3, lineHeight: 1.5 }}>
           {waterTempNowF != null && (
             <span style={{ color: '#38bdf8' }}>
-              Water {waterTempNowF.toFixed(1)}°F{buoyBiasF !== 0 ? ' · buoy 41024' : ' · model'}
+              Water {waterTempNowF.toFixed(1)}°F{buoyBiasF !== 0 && buoyStation ? ` · buoy ${buoyStation}` : ' · model'}
             </span>
           )}
           {waterTempNowF != null && ' · '}
-          Tide: Shallotte Inlet
+          Tide: {region.tideStationName}
           <br />
           {demStatus === 'loading' && 'Scanning bathymetry for structure…'}
           {demStatus === 'ready' && `${spotCount} structure spots · tap a species below, or click any water for what's best there`}

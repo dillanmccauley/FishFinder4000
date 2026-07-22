@@ -1,5 +1,4 @@
-import type { SpotCandidate } from '../types';
-import { OIB_INLETS } from '../data/oibConfig';
+import type { LatLng, SpotCandidate } from '../types';
 import { distanceMi } from './geo';
 
 const M_TO_FT = 3.28084;
@@ -60,7 +59,11 @@ interface RawCandidate {
  *  - ledges: steep depth gradients (channel edges, drop-offs)
  * Non-max suppression keeps the strongest candidates >= minSepM apart.
  */
-export function computeSpots(dem: DemGrid, maxSpots = 30): SpotCandidate[] {
+export function computeSpots(
+  dem: DemGrid,
+  inlets: { name: string; loc: LatLng }[],
+  maxSpots = 30,
+): SpotCandidate[] {
   const { elev, ncols, nrows } = dem;
   const midLat = (dem.north + dem.south) / 2;
   const cellXM = dem.cellLngDeg * 111320 * Math.cos((midLat * Math.PI) / 180);
@@ -189,20 +192,21 @@ export function computeSpots(dem: DemGrid, maxSpots = 30): SpotCandidate[] {
     const reliefFt = Math.round(k.reliefM * M_TO_FT);
     const flatFt = Math.max(1, Math.round(k.flatDepthM * M_TO_FT));
 
-    let nearestInlet = OIB_INLETS[0];
+    let nearestInlet = inlets[0];
     let nearestMi = Infinity;
-    for (const inlet of OIB_INLETS) {
+    for (const inlet of inlets) {
       const d = distanceMi({ lat, lng }, inlet.loc);
       if (d < nearestMi) { nearestMi = d; nearestInlet = inlet; }
     }
-    const inletNote = `${nearestMi.toFixed(1)} mi to ${nearestInlet.name}`;
+    const inletNote = nearestInlet ? `${nearestMi.toFixed(1)} mi to ${nearestInlet.name}` : '';
 
+    const inletSuffix = inletNote ? ` · ${inletNote}` : '';
     const description = k.kind === 'hole'
-      ? `${depthFt} ft hole in ${flatFt} ft flats — ${reliefFt} ft of relief · ${inletNote}`
-      : `Drop-off: ~${Math.max(1, depthFt - reliefFt)}→${depthFt + reliefFt} ft over ~100 ft · ${inletNote}`;
+      ? `${depthFt} ft hole in ${flatFt} ft flats — ${reliefFt} ft of relief${inletSuffix}`
+      : `Drop-off: ~${Math.max(1, depthFt - reliefFt)}→${depthFt + reliefFt} ft over ~100 ft${inletSuffix}`;
 
     return {
-      id: `oib-spot-${i}`,
+      id: `dem-spot-${i}`,
       lat,
       lng,
       kind: k.kind,

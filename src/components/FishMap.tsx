@@ -10,16 +10,16 @@ import { SearchBar } from './SearchBar';
 import { Legend } from './Legend';
 import { NearMePanel } from './NearMePanel';
 import { SpotForecastPanel } from './SpotForecastPanel';
-import { OIBPanel } from './OIBPanel';
+import { RegionPanel } from './RegionPanel';
 import { useLocationForecast } from '../hooks/useLocationForecast';
-import { useOIBDem } from '../hooks/useOIBDem';
-import { useOIBStructures } from '../hooks/useOIBStructures';
-import { useOIBForecast, type SpeciesOutlook } from '../hooks/useOIBForecast';
+import { useRegionDem } from '../hooks/useRegionDem';
+import { useRegionStructures } from '../hooks/useRegionStructures';
+import { useRegionForecast, type SpeciesOutlook } from '../hooks/useRegionForecast';
 import { DepthShadeLayer, type OverlayMode } from '../utils/depthShadeLayer';
 import { computeGradeField, spatialScoreAt } from '../utils/gradeField';
 import { demElevAt, SPOT_KIND_COLOR, SPOT_KIND_LABEL, type DemGrid } from '../utils/spotDiscovery';
 import { scoreToGrade } from '../utils/scoring';
-import { OIB_CENTER } from '../data/oibConfig';
+import { REGIONS, type FishingRegion } from '../data/regions';
 import type { SpotCandidate } from '../types';
 
 /** Click-anywhere popup: which species are best at this exact location right now */
@@ -29,6 +29,7 @@ function locationPopupHtml(
   dem: DemGrid,
   spots: SpotCandidate[],
   outlooks: SpeciesOutlook[],
+  region: FishingRegion,
 ): string {
   const elev = demElevAt(dem, lat, lng);
   if (elev == null || elev >= -0.3) {
@@ -49,7 +50,7 @@ function locationPopupHtml(
 
   const ranked = outlooks
     .map(o => {
-      const spatial = spatialScoreAt(dem, spots, o.species, o.profile, lat, lng);
+      const spatial = spatialScoreAt(dem, spots, o.species, o.profile, region.oceanDivider, lat, lng);
       if (spatial == null) return null;
       const score = Math.round(Math.max(0, Math.min(100, 0.55 * o.scoreNow + spatial)));
       return { o, score, grade: scoreToGrade(score) };
@@ -182,13 +183,14 @@ export function FishMap({
   const depthLayerRef = useRef<DepthShadeLayer | null>(null);
   const osmLayerRef = useRef<L.TileLayer | null>(null);
   const spotMarkersRef = useRef<L.Marker[]>([]);
-  const wasOibModeRef = useRef(false);
+  const wasOibModeRef = useRef<string | null>(null);
 
   const [legendVisible, setLegendVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [nauticalVisible, setNauticalVisible] = useState(false);
   const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
-  const [oibMode, setOibMode] = useState(false);
+  const [activeRegion, setActiveRegion] = useState<FishingRegion | null>(null);
+  const [regionMenuOpen, setRegionMenuOpen] = useState(false);
   const [overlayMode, setOverlayMode] = useState<OverlayMode | 'off'>('grade');
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<string | null>(null);
 
@@ -199,25 +201,25 @@ export function FishMap({
     nowDate,
   });
 
-  // Ocean Isle Beach hyper-local mode
-  const { dem, spots: demSpots, loading: demLoading, error: demError } = useOIBDem(oibMode);
-  const { reefSpots } = useOIBStructures(oibMode);
-  const oibForecast = useOIBForecast(oibMode, targetDate, nowDate);
+  // Config-driven local mode (Ocean Isle Beach, Wilmington, …)
+  const { dem, spots: demSpots, loading: demLoading, error: demError } = useRegionDem(activeRegion);
+  const { reefSpots } = useRegionStructures(activeRegion);
+  const regionForecast = useRegionForecast(activeRegion, targetDate, nowDate);
   const allSpots = useMemo(() => [...demSpots, ...reefSpots], [demSpots, reefSpots]);
 
   // Species the grade heatmap tracks — explicit selection or the top-ranked one
   const selectedOutlook = useMemo(
-    () => oibForecast.outlooks.find(o => o.species.id === selectedSpeciesId) ?? oibForecast.outlooks[0] ?? null,
-    [oibForecast.outlooks, selectedSpeciesId],
+    () => regionForecast.outlooks.find(o => o.species.id === selectedSpeciesId) ?? regionForecast.outlooks[0] ?? null,
+    [regionForecast.outlooks, selectedSpeciesId],
   );
 
   // Static per-cell spatial score for that species (depth fit + structure + zone);
   // recomputes only on species/spots change, not every scrub tick
   const gradeField = useMemo(() => {
-    if (!oibMode || !dem || !selectedOutlook) return null;
-    return computeGradeField(dem, allSpots, selectedOutlook.species, selectedOutlook.profile);
+    if (!activeRegion || !dem || !selectedOutlook) return null;
+    return computeGradeField(dem, allSpots, selectedOutlook.species, selectedOutlook.profile, activeRegion.oceanDivider);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [oibMode, dem, allSpots, selectedOutlook?.species.id]);
+  }, [activeRegion, dem, allSpots, selectedOutlook?.species.id]);
 
   // Top structure spots for the selected species: structure affinity + depth fit
   const bestSpotsForSelected = useMemo(() => {
@@ -310,12 +312,12 @@ export function FishMap({
         setIsCreating(false);
         return;
       }
-      // OIB mode: click any water → ranked species for that exact location
-      if (oibMode) {
+      // Local mode: click any water → ranked species for that exact location
+      if (activeRegion) {
         if (dem) {
           L.popup({ maxWidth: 290 })
             .setLatLng(e.latlng)
-            .setContent(locationPopupHtml(loc.lat, loc.lng, dem, allSpots, oibForecast.outlooks))
+            .setContent(locationPopupHtml(loc.lat, loc.lng, dem, allSpots, regionForecast.outlooks, activeRegion))
             .openOn(map);
         }
         return;
@@ -326,22 +328,22 @@ export function FishMap({
 
     map.on('click', handler);
     return () => { map.off('click', handler); };
-  }, [isCreating, onRequestCreateZone, oibMode, dem, allSpots, oibForecast.outlooks]);
+  }, [isCreating, onRequestCreateZone, activeRegion, dem, allSpots, regionForecast.outlooks]);
 
-  // OIB mode: fly to the area on entry
+  // Local mode: fly to the region on entry / region switch
   useEffect(() => {
-    if (oibMode && !wasOibModeRef.current) {
-      mapRef.current?.flyTo([OIB_CENTER.lat, OIB_CENTER.lng], 12, { duration: 1.5 });
+    if (activeRegion && wasOibModeRef.current !== activeRegion.id) {
+      mapRef.current?.flyTo([activeRegion.center.lat, activeRegion.center.lng], activeRegion.zoom, { duration: 1.5 });
     }
-    wasOibModeRef.current = oibMode;
-  }, [oibMode]);
+    wasOibModeRef.current = activeRegion?.id ?? null;
+  }, [activeRegion]);
 
-  // OIB street-detail basemap — the Esri Ocean base has almost no land detail at
-  // high zoom, so overlay OSM (streets, canals, marinas) while in OIB mode
+  // Local-mode street-detail basemap — the Esri Ocean base has almost no land
+  // detail at high zoom, so overlay OSM (streets, canals, marinas) while active
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (oibMode) {
+    if (activeRegion) {
       if (!osmLayerRef.current) {
         osmLayerRef.current = L.tileLayer(
           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -352,13 +354,13 @@ export function FishMap({
     } else {
       osmLayerRef.current?.remove();
     }
-  }, [oibMode]);
+  }, [activeRegion]);
 
-  // OIB overlay layer — per-pixel grade heatmap or depth shading
+  // Local-mode overlay layer — per-pixel grade heatmap or depth shading
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (oibMode && overlayMode !== 'off') {
+    if (activeRegion && overlayMode !== 'off') {
       if (!depthLayerRef.current) {
         depthLayerRef.current = new DepthShadeLayer();
         depthLayerRef.current.addTo(map);
@@ -372,9 +374,9 @@ export function FishMap({
       depthLayerRef.current?.remove();
       depthLayerRef.current = null;
     }
-  }, [oibMode, dem, overlayMode, gradeField, selectedOutlook]);
+  }, [activeRegion, dem, overlayMode, gradeField, selectedOutlook]);
 
-  // OIB spot markers — created when spots load (static seafloor data)
+  // Local-mode spot markers — created when spots load (static seafloor data)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -382,7 +384,7 @@ export function FishMap({
     spotMarkersRef.current.forEach(m => m.remove());
     spotMarkersRef.current = [];
 
-    if (!oibMode) return;
+    if (!activeRegion) return;
 
     allSpots.forEach(spot => {
       const marker = L.marker([spot.lat, spot.lng], { icon: makeSpotIcon(spot, false) })
@@ -390,11 +392,11 @@ export function FishMap({
         .addTo(map);
       spotMarkersRef.current.push(marker);
     });
-  }, [oibMode, allSpots]);
+  }, [activeRegion, allSpots]);
 
   // Gold-ring highlight on the selected species' best spots
   useEffect(() => {
-    if (!oibMode) return;
+    if (!activeRegion) return;
     const topIds = new Set(bestSpotsForSelected.map(s => s.id));
     spotMarkersRef.current.forEach((marker, i) => {
       const spot = allSpots[i];
@@ -402,16 +404,16 @@ export function FishMap({
       marker.setIcon(makeSpotIcon(spot, topIds.has(spot.id)));
       marker.setZIndexOffset(topIds.has(spot.id) ? 500 : 0);
     });
-  }, [oibMode, allSpots, bestSpotsForSelected]);
+  }, [activeRegion, allSpots, bestSpotsForSelected]);
 
   // Refresh spot popup content when the forecast changes — setContent keeps open popups open
   useEffect(() => {
-    if (!oibMode) return;
+    if (!activeRegion) return;
     spotMarkersRef.current.forEach((marker, i) => {
       const spot = allSpots[i];
-      if (spot) marker.getPopup()?.setContent(spotPopupHtml(spot, oibForecast.outlooks));
+      if (spot) marker.getPopup()?.setContent(spotPopupHtml(spot, regionForecast.outlooks));
     });
-  }, [oibMode, allSpots, oibForecast.outlooks]);
+  }, [activeRegion, allSpots, regionForecast.outlooks]);
 
   // Cursor style
   useEffect(() => {
@@ -561,10 +563,10 @@ export function FishMap({
       <div ref={containerRef} className="w-full h-full" />
       <SearchBar onSelect={(loc, label) => onLocationChange(loc, label)} />
       <Legend visible={legendVisible} onToggle={() => setLegendVisible(v => !v)} />
-      {!oibMode && <NearMePanel userLocation={userLocation} zoneScores={zoneScores} targetDate={targetDate} />}
+      {!activeRegion && <NearMePanel userLocation={userLocation} zoneScores={zoneScores} targetDate={targetDate} />}
 
       {/* Spot forecast panel */}
-      {pinLocation && !oibMode && (
+      {pinLocation && !activeRegion && (
         <SpotForecastPanel
           pin={pinLocation}
           hourlyScores={hourlyScores}
@@ -574,12 +576,14 @@ export function FishMap({
       )}
 
       {/* Ocean Isle Beach species panel */}
-      {oibMode && (
-        <OIBPanel
-          outlooks={oibForecast.outlooks}
-          loading={oibForecast.loading}
-          waterTempNowF={oibForecast.waterTempNowF}
-          buoyBiasF={oibForecast.buoyBiasF}
+      {activeRegion && (
+        <RegionPanel
+          region={activeRegion}
+          outlooks={regionForecast.outlooks}
+          loading={regionForecast.loading}
+          waterTempNowF={regionForecast.waterTempNowF}
+          buoyBiasF={regionForecast.buoyBiasF}
+          buoyStation={regionForecast.buoyStation}
           targetDate={targetDate}
           nowDate={nowDate}
           demStatus={demLoading ? 'loading' : demError ? 'error' : 'ready'}
@@ -588,24 +592,36 @@ export function FishMap({
           onSelectSpecies={setSelectedSpeciesId}
           bestSpots={bestSpotsForSelected}
           onFocusSpot={focusSpot}
-          onClose={() => setOibMode(false)}
+          onClose={() => { setActiveRegion(null); setSelectedSpeciesId(null); }}
         />
       )}
 
-      {/* Map control buttons — shift left of the OIB panel when it's open */}
-      <div style={{ position: 'absolute', top: 56, right: oibMode ? 312 : 12, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {/* Map control buttons — shift left of the region panel when it's open */}
+      <div style={{ position: 'absolute', top: 56, right: activeRegion ? 312 : 12, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 6 }}>
 
-        {/* Ocean Isle Beach mode */}
+        {/* Local mode: region picker */}
         <button
-          onClick={() => setOibMode(v => !v)}
-          title={oibMode ? 'Exit Ocean Isle Beach mode' : 'Ocean Isle Beach: structure spots + per-species bite windows'}
-          style={btnStyle(oibMode, '#f59e0b', '#fbbf24')}
+          onClick={() => {
+            if (activeRegion) { setActiveRegion(null); setSelectedSpeciesId(null); setRegionMenuOpen(false); }
+            else setRegionMenuOpen(v => !v);
+          }}
+          title={activeRegion ? `Exit ${activeRegion.name}` : 'High-res local mode: structure spots + per-species bite windows'}
+          style={btnStyle(!!activeRegion || regionMenuOpen, '#f59e0b', '#fbbf24')}
         >
-          🎯 {oibMode ? 'Exit OIB' : 'OIB Mode'}
+          🎯 {activeRegion ? `Exit ${activeRegion.name}` : 'Local Mode'}
         </button>
+        {regionMenuOpen && !activeRegion && REGIONS.map(r => (
+          <button
+            key={r.id}
+            onClick={() => { setActiveRegion(r); setSelectedSpeciesId(null); setRegionMenuOpen(false); }}
+            style={btnStyle(false, '#f59e0b', '#fbbf24')}
+          >
+            {r.name}
+          </button>
+        ))}
 
-        {/* Overlay cycle: grade heatmap → depth shading → off (OIB mode only) */}
-        {oibMode && (
+        {/* Overlay cycle: grade heatmap → depth shading → off (local mode only) */}
+        {activeRegion && (
           <button
             onClick={() => setOverlayMode(m => (m === 'grade' ? 'depth' : m === 'depth' ? 'off' : 'grade'))}
             title="Cycle overlay: fishing-grade heatmap → depth shading → plain map"
@@ -636,7 +652,7 @@ export function FishMap({
       </div>
 
       {/* OIB grade-heatmap legend */}
-      {oibMode && overlayMode === 'grade' && selectedOutlook && (
+      {activeRegion && overlayMode === 'grade' && selectedOutlook && (
         <div style={{
           position: 'absolute', bottom: 150, left: 12, zIndex: 9999,
           background: '#0f172aee', border: '1px solid #1e293b',
@@ -670,7 +686,7 @@ export function FishMap({
           lineHeight: 1.4,
         }}
       >
-        Data: Open-Meteo · NOAA Tides · CoastWatch SST · ETOPO1 · NOAA ENC · Esri Ocean{oibMode && ' · NCEI CUDEM · CORMP buoys · NOAA reefs'}
+        Data: Open-Meteo · NOAA Tides · CoastWatch SST · ETOPO1 · NOAA ENC · Esri Ocean{activeRegion && ' · NCEI CUDEM · NDBC buoys · NOAA reefs'}
       </div>
     </div>
   );

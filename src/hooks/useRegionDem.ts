@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import type { SpotCandidate } from '../types';
-import { OIB_BBOX } from '../data/oibConfig';
+import type { FishingRegion } from '../data/regions';
 import { computeSpots, type DemGrid } from '../utils/spotDiscovery';
 
 /**
- * Fetches high-resolution bathymetry for the Ocean Isle Beach box from NCEI's
- * DEM mosaic ImageServers (CUDEM tiles ≈ 3 m native) and derives fishing-spot
- * candidates. ~15 m sampling — fine enough to resolve ICW holes and channel edges.
+ * Fetches high-resolution bathymetry for a region from NCEI's DEM mosaic
+ * ImageServers (CUDEM tiles ≈ 3 m native, national coverage) and derives
+ * fishing-spot candidates. ~15–20 m sampling resolves ICW holes and edges.
  *
  * Fallback chain: DEM_tiles_mosaic (1/9 arc-sec CUDEM) → DEM_all → CRM_mosaic (~90 m).
  */
@@ -16,22 +16,22 @@ const DEM_SERVICES = [
   'https://gis.ngdc.noaa.gov/arcgis/rest/services/DEM_mosaics/CRM_mosaic/ImageServer',
 ];
 
-const NCOLS = 1400;
-const NROWS = 768;
+const DEFAULT_SIZE = { width: 1400, height: 768 };
 
-interface OIBDemState {
+interface RegionDemState {
   dem: DemGrid | null;
   spots: SpotCandidate[];
   loading: boolean;
   error: string | null;
 }
 
-// Module-level cache — DEM is static seafloor data; fetch once per session
-let cached: { dem: DemGrid; spots: SpotCandidate[] } | null = null;
-let inflight: Promise<{ dem: DemGrid; spots: SpotCandidate[] }> | null = null;
+// Per-region caches — seafloor data is static; fetch once per region per session
+const cache = new Map<string, { dem: DemGrid; spots: SpotCandidate[] }>();
+const inflight = new Map<string, Promise<{ dem: DemGrid; spots: SpotCandidate[] }>>();
 
-async function fetchDem(): Promise<{ dem: DemGrid; spots: SpotCandidate[] }> {
-  const { sw, ne } = OIB_BBOX;
+async function fetchDem(region: FishingRegion): Promise<{ dem: DemGrid; spots: SpotCandidate[] }> {
+  const { sw, ne } = region.bbox;
+  const { width: NCOLS, height: NROWS } = region.demSize ?? DEFAULT_SIZE;
   const bbox = `${sw.lng},${sw.lat},${ne.lng},${ne.lat}`;
   const params =
     `bbox=${encodeURIComponent(bbox)}&bboxSR=4326&imageSR=4326` +
@@ -92,14 +92,14 @@ async function fetchDem(): Promise<{ dem: DemGrid; spots: SpotCandidate[] }> {
         cellLatDeg: (north - south) / height,
       };
 
-      // Sanity check: the box is mostly ocean — demand a real share of water cells
+      // Sanity check: the box is coastal — demand a real share of water cells
       let waterCells = 0;
       for (let i = 0; i < elev.length; i += 37) {
         if (Number.isFinite(elev[i]) && elev[i] < -0.3) waterCells++;
       }
       if (waterCells < elev.length / 37 * 0.1) throw new Error('raster contains no water');
 
-      const spots = computeSpots(dem);
+      const spots = computeSpots(dem, region.inlets);
       return { dem, spots };
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
@@ -108,33 +108,42 @@ async function fetchDem(): Promise<{ dem: DemGrid; spots: SpotCandidate[] }> {
   throw lastErr ?? new Error('all DEM services failed');
 }
 
-export function useOIBDem(enabled: boolean): OIBDemState {
-  const [state, setState] = useState<OIBDemState>(() => ({
-    dem: cached?.dem ?? null,
-    spots: cached?.spots ?? [],
-    loading: false,
-    error: null,
-  }));
+const EMPTY: RegionDemState = { dem: null, spots: [], loading: false, error: null };
+
+export function useRegionDem(region: FishingRegion | null): RegionDemState {
+  const [state, setState] = useState<RegionDemState>(EMPTY);
 
   useEffect(() => {
-    if (!enabled || cached) return;
+    if (!region) {
+      setState(EMPTY);
+      return;
+    }
+    const cached = cache.get(region.id);
+    if (cached) {
+      setState({ dem: cached.dem, spots: cached.spots, loading: false, error: null });
+      return;
+    }
     let cancelled = false;
 
-    setState(s => ({ ...s, loading: true, error: null }));
-    if (!inflight) inflight = fetchDem();
+    setState({ dem: null, spots: [], loading: true, error: null });
+    let promise = inflight.get(region.id);
+    if (!promise) {
+      promise = fetchDem(region);
+      inflight.set(region.id, promise);
+    }
 
-    inflight
+    promise
       .then(result => {
-        cached = result;
+        cache.set(region.id, result);
         if (!cancelled) setState({ dem: result.dem, spots: result.spots, loading: false, error: null });
       })
       .catch(err => {
-        inflight = null;
+        inflight.delete(region.id);
         if (!cancelled) setState({ dem: null, spots: [], loading: false, error: err.message ?? 'DEM fetch failed' });
       });
 
     return () => { cancelled = true; };
-  }, [enabled]);
+  }, [region]);
 
   return state;
 }

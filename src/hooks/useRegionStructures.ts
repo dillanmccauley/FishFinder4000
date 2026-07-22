@@ -1,25 +1,26 @@
 import { useState, useEffect } from 'react';
 import type { SpotCandidate } from '../types';
-import { OIB_BBOX, OIB_INLETS } from '../data/oibConfig';
+import type { FishingRegion } from '../data/regions';
 import { distanceMi } from '../utils/geo';
 
 /**
- * Fetches known artificial-reef locations around Ocean Isle Beach as ready-made
- * spot candidates:
- *  1. NOAA Digital Coast national artificial reef layer (verified endpoint)
+ * Fetches known artificial-reef locations within a region as ready-made spot
+ * candidates:
+ *  1. NOAA Digital Coast national artificial reef layer
  *  2. Best-effort: resolve NC DMF "Artificial Reef Material" hosted layer via
- *     the ArcGIS Online search API (per-drop material locations: reef balls, pipe…)
+ *     the ArcGIS Online search API (per-drop material locations; harmlessly
+ *     returns nothing outside NC)
  * Both fail silently — DEM-derived spots still work without them.
  */
 
 const NOAA_REEFS_URL = 'https://coast.noaa.gov/arcgis/rest/services/Hosted/ArtificialReefs/FeatureServer/0';
 const AGO_SEARCH = 'https://www.arcgis.com/sharing/rest/search';
 
-// Module cache — reef locations are static
-let cachedReefs: SpotCandidate[] | null = null;
+// Per-region cache — reef locations are static
+const cache = new Map<string, SpotCandidate[]>();
 
-function bboxParams(): string {
-  const { sw, ne } = OIB_BBOX;
+function bboxParams(region: FishingRegion): string {
+  const { sw, ne } = region.bbox;
   // Pad the box a touch so nearshore ARs just outside still show
   const pad = 0.06;
   const geometry = `${sw.lng - pad},${sw.lat - pad},${ne.lng + pad},${ne.lat + pad}`;
@@ -59,15 +60,15 @@ function featureName(f: EsriFeature): string {
   return 'Artificial reef';
 }
 
-function toSpot(lat: number, lng: number, name: string, idx: number): SpotCandidate {
-  let nearestInlet = OIB_INLETS[0];
+function toSpot(region: FishingRegion, lat: number, lng: number, name: string, idx: number): SpotCandidate {
+  let nearestInlet = region.inlets[0];
   let nearestMi = Infinity;
-  for (const inlet of OIB_INLETS) {
+  for (const inlet of region.inlets) {
     const d = distanceMi({ lat, lng }, inlet.loc);
     if (d < nearestMi) { nearestMi = d; nearestInlet = inlet; }
   }
   return {
-    id: `oib-reef-${idx}`,
+    id: `${region.id}-reef-${idx}`,
     lat,
     lng,
     kind: 'reef',
@@ -78,28 +79,29 @@ function toSpot(lat: number, lng: number, name: string, idx: number): SpotCandid
   };
 }
 
-async function queryLayer(layerUrl: string): Promise<EsriFeature[]> {
-  const res = await fetch(`${layerUrl}/query?${bboxParams()}`);
+async function queryLayer(layerUrl: string, params: string): Promise<EsriFeature[]> {
+  const res = await fetch(`${layerUrl}/query?${params}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   if (data.error) throw new Error(data.error.message ?? 'esri error');
   return data.features ?? [];
 }
 
-async function fetchReefs(): Promise<SpotCandidate[]> {
+async function fetchReefs(region: FishingRegion): Promise<SpotCandidate[]> {
   const spots: SpotCandidate[] = [];
   const seen = new Set<string>();
+  const params = bboxParams(region);
 
   const push = (lat: number, lng: number, name: string) => {
     const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
     if (seen.has(key)) return;
     seen.add(key);
-    spots.push(toSpot(lat, lng, name, spots.length));
+    spots.push(toSpot(region, lat, lng, name, spots.length));
   };
 
   // 1. NOAA national reef layer
   try {
-    const feats = await queryLayer(NOAA_REEFS_URL);
+    const feats = await queryLayer(NOAA_REEFS_URL, params);
     feats.forEach(f => {
       const ll = featureLatLng(f);
       if (ll) push(ll.lat, ll.lng, featureName(f));
@@ -113,7 +115,7 @@ async function fetchReefs(): Promise<SpotCandidate[]> {
     const data = await res.json();
     const item = (data.results ?? []).find((r: { url?: string }) => typeof r.url === 'string' && r.url.includes('/FeatureServer'));
     if (item?.url) {
-      const feats = await queryLayer(`${item.url}/0`);
+      const feats = await queryLayer(`${item.url}/0`, params);
       feats.forEach(f => {
         const ll = featureLatLng(f);
         if (ll) push(ll.lat, ll.lng, featureName(f));
@@ -124,18 +126,26 @@ async function fetchReefs(): Promise<SpotCandidate[]> {
   return spots;
 }
 
-export function useOIBStructures(enabled: boolean): { reefSpots: SpotCandidate[]; loading: boolean } {
-  const [reefSpots, setReefSpots] = useState<SpotCandidate[]>(cachedReefs ?? []);
+export function useRegionStructures(region: FishingRegion | null): { reefSpots: SpotCandidate[]; loading: boolean } {
+  const [reefSpots, setReefSpots] = useState<SpotCandidate[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!enabled || cachedReefs) return;
+    if (!region) {
+      setReefSpots([]);
+      return;
+    }
+    const cached = cache.get(region.id);
+    if (cached) {
+      setReefSpots(cached);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
 
-    fetchReefs()
+    fetchReefs(region)
       .then(spots => {
-        cachedReefs = spots;
+        cache.set(region.id, spots);
         if (!cancelled) { setReefSpots(spots); setLoading(false); }
       })
       .catch(() => {
@@ -143,7 +153,7 @@ export function useOIBStructures(enabled: boolean): { reefSpots: SpotCandidate[]
       });
 
     return () => { cancelled = true; };
-  }, [enabled]);
+  }, [region]);
 
   return { reefSpots, loading };
 }

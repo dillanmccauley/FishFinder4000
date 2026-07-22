@@ -1,6 +1,5 @@
-import type { Species, SpotCandidate } from '../types';
-import type { OIBSpeciesProfile } from '../data/oibConfig';
-import { OIB_INLETS } from '../data/oibConfig';
+import type { LatLng, Species, SpotCandidate } from '../types';
+import type { RegionSpeciesProfile } from '../data/regions';
 import type { DemGrid } from './spotDiscovery';
 
 /**
@@ -17,13 +16,21 @@ const MAX_STRUCTURE_BONUS = 18;
 const M_TO_FT = 3.28084;
 
 /**
- * Rough ICW/ocean divider: the barrier island axis through Tubbs and Shallotte
- * inlets. South of the line = open ocean side, north = ICW/estuary side.
+ * Rough ICW/ocean divider: a per-region polyline along the barrier-island axis
+ * (ordered west→east). Latitudes below the interpolated line = open ocean side,
+ * above = ICW/estuary side. Outside the polyline's lng range, the nearest end
+ * segment extrapolates.
  */
-function oceanSideLat(lng: number): number {
-  const a = OIB_INLETS[1].loc; // Tubbs (west)
-  const b = OIB_INLETS[0].loc; // Shallotte (east)
-  const t = (lng - a.lng) / (b.lng - a.lng);
+export function dividerLatAt(divider: LatLng[], lng: number): number {
+  if (divider.length === 1) return divider[0].lat;
+  let a = divider[0];
+  let b = divider[1];
+  for (let i = 0; i < divider.length - 1; i++) {
+    a = divider[i];
+    b = divider[i + 1];
+    if (lng <= b.lng || i === divider.length - 2) break;
+  }
+  const t = b.lng === a.lng ? 0 : (lng - a.lng) / (b.lng - a.lng);
   return a.lat + (b.lat - a.lat) * t;
 }
 
@@ -36,7 +43,8 @@ export function spatialScoreAt(
   dem: DemGrid,
   spots: SpotCandidate[],
   species: Species,
-  profile: OIBSpeciesProfile,
+  profile: RegionSpeciesProfile,
+  oceanDivider: LatLng[] | undefined,
   lat: number,
   lng: number,
 ): number | null {
@@ -57,8 +65,8 @@ export function spatialScoreAt(
   }
 
   let zoneFactor = 1;
-  if (profile.zone !== 'both') {
-    const isOcean = lat < oceanSideLat(lng);
+  if (profile.zone !== 'both' && oceanDivider?.length) {
+    const isOcean = lat < dividerLatAt(oceanDivider, lng);
     if (profile.zone === 'icw' && isOcean) zoneFactor = 0.55;
     if (profile.zone === 'nearshore' && !isOcean) zoneFactor = 0.55;
   }
@@ -82,7 +90,8 @@ export function computeGradeField(
   dem: DemGrid,
   spots: SpotCandidate[],
   species: Species,
-  profile: OIBSpeciesProfile,
+  profile: RegionSpeciesProfile,
+  oceanDivider?: LatLng[],
 ): Float32Array {
   const { elev, ncols, nrows } = dem;
   const midLat = (dem.north + dem.south) / 2;
@@ -110,9 +119,9 @@ export function computeGradeField(
       }
 
       let zoneFactor = 1;
-      if (profile.zone !== 'both') {
+      if (profile.zone !== 'both' && oceanDivider?.length) {
         const lng = dem.west + (c + 0.5) * dem.cellLngDeg;
-        const isOcean = lat < oceanSideLat(lng);
+        const isOcean = lat < dividerLatAt(oceanDivider, lng);
         if (profile.zone === 'icw' && isOcean) zoneFactor = 0.55;
         if (profile.zone === 'nearshore' && !isOcean) zoneFactor = 0.55;
       }
