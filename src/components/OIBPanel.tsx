@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { format } from 'date-fns';
 import type { SpeciesOutlook } from '../hooks/useOIBForecast';
 import { GRADE_COLORS } from '../utils/scoring';
@@ -12,6 +11,9 @@ interface Props {
   nowDate: Date;
   demStatus: 'loading' | 'ready' | 'error';
   spotCount: number;
+  /** Species the grade heatmap is tracking; null = top-ranked */
+  selectedSpeciesId: string | null;
+  onSelectSpecies: (id: string | null) => void;
   onClose: () => void;
 }
 
@@ -79,8 +81,9 @@ function DriversLine({ outlook }: { outlook: SpeciesOutlook }) {
   );
 }
 
-export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDate, nowDate, demStatus, spotCount, onClose }: Props) {
-  const [expanded, setExpanded] = useState<string | null>(null);
+export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDate, nowDate, demStatus, spotCount, selectedSpeciesId, onSelectSpecies, onClose }: Props) {
+  // The heatmap tracks the top-ranked species until one is explicitly selected
+  const effectiveSelectedId = selectedSpeciesId ?? outlooks[0]?.species.id ?? null;
 
   return (
     <div style={{
@@ -122,11 +125,11 @@ export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDa
           <div style={{ color: '#64748b', fontSize: 11, textAlign: 'center', padding: 20 }}>Loading forecast…</div>
         )}
         {outlooks.map(o => {
-          const isOpen = expanded === o.species.id;
+          const isOpen = effectiveSelectedId === o.species.id;
           return (
             <div
               key={o.species.id}
-              onClick={() => setExpanded(isOpen ? null : o.species.id)}
+              onClick={() => onSelectSpecies(isOpen ? null : o.species.id)}
               style={{
                 marginBottom: 8, padding: '8px 9px', borderRadius: 9, cursor: 'pointer',
                 background: '#1e293b66', border: `1px solid ${isOpen ? GRADE_COLORS[o.gradeNow] + '88' : '#1e293b'}`,
@@ -185,7 +188,7 @@ export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDa
           <span style={{ width: 7, height: 7, background: '#f59e0b', transform: 'rotate(45deg)', display: 'inline-block' }} /> reef
         </span>
         <br />
-        Next 72h · white line = scrubber time · tap a card for tactics
+        Next 72h · white line = scrubber time · heatmap follows the selected species
       </div>
     </div>
   );

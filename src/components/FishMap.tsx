@@ -2,11 +2,9 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import { createRoot } from 'react-dom/client';
-import type { BBox, LatLng, ZoneScore, Hotspot, MarineConditions, TideInfo } from '../types';
+import type { LatLng, ZoneScore, Hotspot, MarineConditions, TideInfo } from '../types';
 import { HOTSPOTS } from '../data/hotspots';
 import { GRADE_COLORS, GRADE_LABELS } from '../utils/scoring';
-import { RasterHeatLayer } from '../utils/rasterHeatLayer';
-import { TileGridLayer, TILE_DEG } from '../utils/tileGridLayer';
 import { ZonePopup } from './ZonePopup';
 import { SearchBar } from './SearchBar';
 import { Legend } from './Legend';
@@ -14,14 +12,11 @@ import { NearMePanel } from './NearMePanel';
 import { SpotForecastPanel } from './SpotForecastPanel';
 import { OIBPanel } from './OIBPanel';
 import { useLocationForecast } from '../hooks/useLocationForecast';
-import { useRasterForecast } from '../hooks/useRasterForecast';
-import { useBathymetry } from '../hooks/useBathymetry';
-import { useSatSST } from '../hooks/useSatSST';
-import { useMarineStructure } from '../hooks/useMarineStructure';
 import { useOIBDem } from '../hooks/useOIBDem';
 import { useOIBStructures } from '../hooks/useOIBStructures';
 import { useOIBForecast, type SpeciesOutlook } from '../hooks/useOIBForecast';
-import { DepthShadeLayer } from '../utils/depthShadeLayer';
+import { DepthShadeLayer, type OverlayMode } from '../utils/depthShadeLayer';
+import { computeGradeField } from '../utils/gradeField';
 import { OIB_CENTER } from '../data/oibConfig';
 import type { SpotCandidate } from '../types';
 
@@ -129,8 +124,6 @@ export function FishMap({
   const userMarkerRef = useRef<L.Marker | null>(null);
   const popupRootsRef = useRef<Map<string, ReturnType<typeof createRoot>>>(new Map());
   const nauticalLayerRef = useRef<L.TileLayer | null>(null);
-  const rasterLayerRef = useRef<RasterHeatLayer | null>(null);
-  const tileGridLayerRef = useRef<TileGridLayer | null>(null);
   const pinMarkerRef = useRef<L.Marker | null>(null);
   const depthLayerRef = useRef<DepthShadeLayer | null>(null);
   const osmLayerRef = useRef<L.TileLayer | null>(null);
@@ -140,10 +133,10 @@ export function FishMap({
   const [legendVisible, setLegendVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [nauticalVisible, setNauticalVisible] = useState(false);
-  const [rasterBBox, setRasterBBox] = useState<BBox | null>(null);
   const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
   const [oibMode, setOibMode] = useState(false);
-  const [depthVisible, setDepthVisible] = useState(true);
+  const [overlayMode, setOverlayMode] = useState<OverlayMode | 'off'>('grade');
+  const [selectedSpeciesId, setSelectedSpeciesId] = useState<string | null>(null);
 
   const { hourlyScores } = useLocationForecast({
     pin: pinLocation,
@@ -152,29 +145,25 @@ export function FishMap({
     nowDate,
   });
 
-  const { classifyCell, getDepthAt, loading: bathyLoading } = useBathymetry(rasterBBox);
-  const { getSatSSTAt, loading: sstLoading } = useSatSST(rasterBBox);
-  const { getStructureBonusAt, loading: structureLoading } = useMarineStructure(rasterBBox);
-
-  const { gridPoints, loading: rasterLoading, pointsLoaded, pointsTotal, pointsFailed } = useRasterForecast(
-    rasterBBox,
-    targetDate,
-    getConditionsAt,
-    getTideAt,
-    nowDate,
-    classifyCell,
-    getSatSSTAt,
-    getStructureBonusAt,
-    getDepthAt,
-  );
-
-  const anyLoading = rasterLoading || bathyLoading || sstLoading || structureLoading;
-
   // Ocean Isle Beach hyper-local mode
   const { dem, spots: demSpots, loading: demLoading, error: demError } = useOIBDem(oibMode);
   const { reefSpots } = useOIBStructures(oibMode);
   const oibForecast = useOIBForecast(oibMode, targetDate, nowDate);
   const allSpots = useMemo(() => [...demSpots, ...reefSpots], [demSpots, reefSpots]);
+
+  // Species the grade heatmap tracks — explicit selection or the top-ranked one
+  const selectedOutlook = useMemo(
+    () => oibForecast.outlooks.find(o => o.species.id === selectedSpeciesId) ?? oibForecast.outlooks[0] ?? null,
+    [oibForecast.outlooks, selectedSpeciesId],
+  );
+
+  // Static per-cell spatial score for that species (depth fit + structure + zone);
+  // recomputes only on species/spots change, not every scrub tick
+  const gradeField = useMemo(() => {
+    if (!oibMode || !dem || !selectedOutlook) return null;
+    return computeGradeField(dem, allSpots, selectedOutlook.species, selectedOutlook.profile);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oibMode, dem, allSpots, selectedOutlook?.species.id]);
 
   // Combined hotspot map (regular + custom)
   const allHotspotsMap = useMemo(() => {
@@ -205,11 +194,6 @@ export function FishMap({
       { attribution: '', maxNativeZoom: 13, maxZoom: 19 }
     ).addTo(map);
 
-    // Tile grid overlay — always visible, click-to-select
-    const tileGrid = new TileGridLayer();
-    tileGrid.addTo(map);
-    tileGridLayerRef.current = tileGrid;
-
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
     mapRef.current = map;
@@ -218,7 +202,6 @@ export function FishMap({
     return () => {
       map.remove();
       mapRef.current = null;
-      tileGridLayerRef.current = null;
       markersRef.current.clear();
       const roots = [...popupRootsRef.current.values()];
       popupRootsRef.current.clear();
@@ -239,19 +222,10 @@ export function FishMap({
         setIsCreating(false);
         return;
       }
-      // In OIB mode the depth layer + spot markers own the map — no tile raster or pin
+      // In OIB mode the grade overlay + spot markers own the map — no pin
       if (oibMode) return;
       // Drop pin for spot forecast
       setPinLocation(loc);
-      // Snap click to the 0.5° tile it falls in and start heatmap
-      const swLat = Math.floor(loc.lat / TILE_DEG) * TILE_DEG;
-      const swLng = Math.floor(loc.lng / TILE_DEG) * TILE_DEG;
-      const tileBBox: BBox = {
-        sw: { lat: swLat, lng: swLng },
-        ne: { lat: swLat + TILE_DEG, lng: swLng + TILE_DEG },
-      };
-      setRasterBBox(tileBBox);
-      tileGridLayerRef.current?.setSelectedTile(tileBBox);
     };
 
     map.on('click', handler);
@@ -284,21 +258,25 @@ export function FishMap({
     }
   }, [oibMode]);
 
-  // OIB depth-shade layer
+  // OIB overlay layer — per-pixel grade heatmap or depth shading
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (oibMode && depthVisible) {
+    if (oibMode && overlayMode !== 'off') {
       if (!depthLayerRef.current) {
         depthLayerRef.current = new DepthShadeLayer();
         depthLayerRef.current.addTo(map);
       }
-      depthLayerRef.current.setDem(dem);
+      const layer = depthLayerRef.current;
+      layer.setDem(dem);
+      layer.setMode(overlayMode);
+      layer.setGradeField(gradeField);
+      layer.setConditionScore(selectedOutlook?.scoreNow ?? 60);
     } else {
       depthLayerRef.current?.remove();
       depthLayerRef.current = null;
     }
-  }, [oibMode, dem, depthVisible]);
+  }, [oibMode, dem, overlayMode, gradeField, selectedOutlook]);
 
   // OIB spot markers — created when spots load (static seafloor data)
   useEffect(() => {
@@ -340,23 +318,6 @@ export function FishMap({
     if (!containerRef.current) return;
     containerRef.current.style.cursor = isCreating ? 'crosshair' : '';
   }, [isCreating]);
-
-  // Raster heat layer — update when gridPoints or bbox changes
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    if (rasterBBox && gridPoints.length > 0) {
-      if (!rasterLayerRef.current) {
-        rasterLayerRef.current = new RasterHeatLayer();
-        rasterLayerRef.current.addTo(map);
-      }
-      rasterLayerRef.current.updateGrid(gridPoints);
-    } else if (!rasterBBox) {
-      rasterLayerRef.current?.remove();
-      rasterLayerRef.current = null;
-    }
-  }, [gridPoints, rasterBBox]);
 
   // OpenSeaMap nautical overlay — buoys, lights, depth marks, hazards
   useEffect(() => {
@@ -495,13 +456,6 @@ export function FishMap({
     });
   }, [zoneScores, allHotspotsMap, onRemoveCustomZone]);
 
-  const clearRaster = () => {
-    rasterLayerRef.current?.remove();
-    rasterLayerRef.current = null;
-    setRasterBBox(null);
-    tileGridLayerRef.current?.setSelectedTile(null);
-  };
-
   return (
     <div className="relative w-full h-full">
       <div ref={containerRef} className="w-full h-full" />
@@ -530,6 +484,8 @@ export function FishMap({
           nowDate={nowDate}
           demStatus={demLoading ? 'loading' : demError ? 'error' : 'ready'}
           spotCount={allSpots.length}
+          selectedSpeciesId={selectedSpeciesId}
+          onSelectSpecies={setSelectedSpeciesId}
           onClose={() => setOibMode(false)}
         />
       )}
@@ -546,14 +502,14 @@ export function FishMap({
           🎯 {oibMode ? 'Exit OIB' : 'OIB Mode'}
         </button>
 
-        {/* Depth shade toggle (OIB mode only) */}
+        {/* Overlay cycle: grade heatmap → depth shading → off (OIB mode only) */}
         {oibMode && (
           <button
-            onClick={() => setDepthVisible(v => !v)}
-            title={depthVisible ? 'Hide depth shading to see the street map' : 'Show depth shading'}
-            style={btnStyle(depthVisible, '#0e7490', '#22d3ee')}
+            onClick={() => setOverlayMode(m => (m === 'grade' ? 'depth' : m === 'depth' ? 'off' : 'grade'))}
+            title="Cycle overlay: fishing-grade heatmap → depth shading → plain map"
+            style={btnStyle(overlayMode !== 'off', overlayMode === 'grade' ? '#16a34a' : '#0e7490', overlayMode === 'grade' ? '#4ade80' : '#22d3ee')}
           >
-            🌊 {depthVisible ? 'Depth On' : 'Depth Off'}
+            {overlayMode === 'grade' ? '🎨 Grade Map' : overlayMode === 'depth' ? '🌊 Depth Map' : '⬛ Overlay Off'}
           </button>
         )}
 
@@ -567,16 +523,6 @@ export function FishMap({
         </button>
         {isCreating && <HintPill>Click map to place zone</HintPill>}
 
-        {/* Clear raster */}
-        {rasterBBox && !anyLoading && (
-          <button
-            onClick={clearRaster}
-            style={btnStyle(false, '#ef4444', '#f87171')}
-          >
-            ✕ Clear Raster
-          </button>
-        )}
-
         {/* OpenSeaMap nautical overlay toggle */}
         <button
           onClick={() => setNauticalVisible(v => !v)}
@@ -587,48 +533,10 @@ export function FishMap({
         </button>
       </div>
 
-      {/* Raster loading progress */}
-      {anyLoading && (
+      {/* OIB grade-heatmap legend */}
+      {oibMode && overlayMode === 'grade' && selectedOutlook && (
         <div style={{
-          position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
-          zIndex: 9999, background: '#0f172aee', border: '1px solid #22d3ee44',
-          borderRadius: 8, padding: '6px 14px',
-          fontSize: 12, color: '#22d3ee', backdropFilter: 'blur(8px)',
-          display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
-        }}>
-          <span style={{
-            width: 10, height: 10, borderRadius: '50%', border: '2px solid #22d3ee',
-            borderTopColor: 'transparent', display: 'inline-block',
-            animation: 'spin 0.8s linear infinite',
-          }} />
-          {rasterLoading
-            ? `Weather: ${pointsLoaded} / ${pointsTotal}`
-            : 'Weather ✓'}
-          {bathyLoading && ' · Depth…'}
-          {!bathyLoading && rasterBBox && ' · Depth ✓'}
-          {sstLoading && ' · SST…'}
-          {!sstLoading && rasterBBox && ' · SST ✓'}
-          {structureLoading && ' · Structure…'}
-        </div>
-      )}
-
-      {/* Failed-fetch warning */}
-      {!anyLoading && rasterBBox && pointsFailed > 0 && (
-        <div style={{
-          position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
-          zIndex: 9999, background: '#0f172aee', border: '1px solid #f59e0b66',
-          borderRadius: 8, padding: '6px 14px',
-          fontSize: 12, color: '#f59e0b', backdropFilter: 'blur(8px)',
-          whiteSpace: 'nowrap',
-        }}>
-          ⚠ {pointsFailed} point{pointsFailed > 1 ? 's' : ''} unavailable (no ocean data)
-        </div>
-      )}
-
-      {/* Raster legend */}
-      {(rasterBBox && gridPoints.length > 0) && (
-        <div style={{
-          position: 'absolute', bottom: 104, right: 12, zIndex: 9999,
+          position: 'absolute', bottom: 150, left: 12, zIndex: 9999,
           background: '#0f172aee', border: '1px solid #1e293b',
           borderRadius: 8, padding: '8px 10px', backdropFilter: 'blur(8px)',
         }}>
@@ -641,8 +549,8 @@ export function FishMap({
               <span style={{ fontSize: 10, color: '#94a3b8' }}>{g} — {GRADE_LABELS[g]}</span>
             </div>
           ))}
-          <div style={{ fontSize: 9, color: '#475569', marginTop: 5, borderTop: '1px solid #1e293b', paddingTop: 4 }}>
-            {gridPoints.length} scored cells · click tile to change
+          <div style={{ fontSize: 9, color: '#38bdf8', marginTop: 5, borderTop: '1px solid #1e293b', paddingTop: 4, maxWidth: 130 }}>
+            {selectedOutlook.species.commonName}
           </div>
         </div>
       )}

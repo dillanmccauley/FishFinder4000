@@ -11,7 +11,7 @@ const COLOR_STOPS = [
   { s: 100, r: 16,  g: 185, b: 129 },
 ];
 
-function scoreToRGB(score: number): [number, number, number] {
+export function scoreToRGB(score: number): [number, number, number] {
   const clamped = Math.max(0, Math.min(100, score));
   let lo = COLOR_STOPS[0];
   let hi = COLOR_STOPS[COLOR_STOPS.length - 1];

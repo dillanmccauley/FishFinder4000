@@ -1,5 +1,8 @@
 import L from 'leaflet';
 import type { DemGrid } from './spotDiscovery';
+import { scoreToRGB } from './rasterHeatLayer';
+
+export type OverlayMode = 'grade' | 'depth';
 
 const M_TO_FT = 3.28084;
 const RESOLUTION = 2;
@@ -46,9 +49,30 @@ export class DepthShadeLayer extends L.Layer {
   private _mapInstance: L.Map | null = null;
   private _dem: DemGrid | null = null;
   private _rafId: number | null = null;
+  private _mode: OverlayMode = 'depth';
+  private _gradeField: Float32Array | null = null;
+  private _conditionScore = 60;
 
   setDem(dem: DemGrid | null): void {
     this._dem = dem;
+    this._scheduleRender();
+  }
+
+  setMode(mode: OverlayMode): void {
+    this._mode = mode;
+    this._scheduleRender();
+  }
+
+  /** Static per-cell spatial score component (depth fit + structure), NaN = land */
+  setGradeField(field: Float32Array | null): void {
+    this._gradeField = field;
+    this._scheduleRender();
+  }
+
+  /** Uniform time-varying condition score (0–100) blended into grade mode */
+  setConditionScore(score: number): void {
+    if (score === this._conditionScore) return;
+    this._conditionScore = score;
     this._scheduleRender();
   }
 
@@ -106,6 +130,10 @@ export class DepthShadeLayer extends L.Layer {
     const cellXM = dem.cellLngDeg * 111320 * Math.cos((midLat * Math.PI) / 180);
     const cellYM = dem.cellLatDeg * 110574;
 
+    const gradeMode = this._mode === 'grade' && this._gradeField != null;
+    const field = this._gradeField;
+    const cond = this._conditionScore;
+
     for (let py = 0; py < h; py += RESOLUTION) {
       for (let px = 0; px < w; px += RESOLUTION) {
         const ll = map.containerPointToLatLng(L.point(px, py));
@@ -116,7 +144,15 @@ export class DepthShadeLayer extends L.Layer {
         const v = elev[r * ncols + c];
         if (!Number.isFinite(v) || v >= -0.1) continue; // land / dry / nodata → transparent
 
-        let [red, green, blue] = depthToRGB(-v * M_TO_FT);
+        let red: number, green: number, blue: number;
+        if (gradeMode) {
+          const spatial = field![r * ncols + c];
+          if (!Number.isFinite(spatial)) continue;
+          const score = Math.max(0, Math.min(100, 0.55 * cond + spatial));
+          [red, green, blue] = scoreToRGB(score);
+        } else {
+          [red, green, blue] = depthToRGB(-v * M_TO_FT);
+        }
 
         // NW-lit hillshade from the local gradient
         const eL = elev[r * ncols + c - 1];
