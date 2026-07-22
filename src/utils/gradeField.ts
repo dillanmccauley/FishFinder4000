@@ -27,6 +27,57 @@ function oceanSideLat(lng: number): number {
   return a.lat + (b.lat - a.lat) * t;
 }
 
+/**
+ * Same formula as computeGradeField, evaluated at a single point — used by the
+ * click-anywhere "what's best right here" popup. Returns null on land/no-data.
+ * Keep the tiers/weights in sync with the bulk version above.
+ */
+export function spatialScoreAt(
+  dem: DemGrid,
+  spots: SpotCandidate[],
+  species: Species,
+  profile: OIBSpeciesProfile,
+  lat: number,
+  lng: number,
+): number | null {
+  const c = Math.floor((lng - dem.west) / dem.cellLngDeg);
+  const r = Math.floor((dem.north - lat) / dem.cellLatDeg);
+  if (c < 0 || c >= dem.ncols || r < 0 || r >= dem.nrows) return null;
+  const v = dem.elev[r * dem.ncols + c];
+  if (!Number.isFinite(v) || v >= -0.3) return null;
+
+  const depthFt = -v * M_TO_FT;
+  const [lo, hi] = species.depthRangeFt;
+  const range = Math.max(hi - lo, 1);
+  let fit: number;
+  if (depthFt >= lo && depthFt <= hi) fit = 95;
+  else {
+    const dist = Math.min(Math.abs(depthFt - lo), Math.abs(depthFt - hi));
+    fit = dist <= range * 0.5 ? 75 : dist <= range * 1.5 ? 50 : dist <= range * 3 ? 25 : 10;
+  }
+
+  let zoneFactor = 1;
+  if (profile.zone !== 'both') {
+    const isOcean = lat < oceanSideLat(lng);
+    if (profile.zone === 'icw' && isOcean) zoneFactor = 0.55;
+    if (profile.zone === 'nearshore' && !isOcean) zoneFactor = 0.55;
+  }
+
+  const midLat = (dem.north + dem.south) / 2;
+  const mPerDegLng = 111320 * Math.cos((midLat * Math.PI) / 180);
+  let bonus = 0;
+  for (const spot of spots) {
+    const affinity = profile.structureAffinity[spot.kind] ?? 0.3;
+    const maxBonus = MAX_STRUCTURE_BONUS * affinity * (spot.structureScore / 100);
+    if (maxBonus <= 1) continue;
+    const distM = Math.sqrt(((spot.lat - lat) * 110574) ** 2 + ((spot.lng - lng) * mPerDegLng) ** 2);
+    if (distM > STRUCTURE_RADIUS_M) continue;
+    bonus = Math.max(bonus, maxBonus * (1 - distM / STRUCTURE_RADIUS_M));
+  }
+
+  return Math.min(0.45 * fit * zoneFactor + bonus, 0.45 * 95 + MAX_STRUCTURE_BONUS);
+}
+
 export function computeGradeField(
   dem: DemGrid,
   spots: SpotCandidate[],
@@ -71,9 +122,12 @@ export function computeGradeField(
   }
 
   // Stamp structure-proximity bonus around each spot, weighted by the species'
-  // affinity for that structure kind; linear decay to the radius, max-combined
+  // affinity for that structure kind; linear decay to the radius. Overlapping
+  // stamps max-combine (matching spatialScoreAt) so clustered weak spots never
+  // outbid one strong spot.
   const rx = Math.max(1, Math.round(STRUCTURE_RADIUS_M / cellXM));
   const ry = Math.max(1, Math.round(STRUCTURE_RADIUS_M / cellYM));
+  const bonusField = new Float32Array(ncols * nrows);
 
   for (const spot of spots) {
     const affinity = profile.structureAffinity[spot.kind] ?? 0.3;
@@ -90,16 +144,18 @@ export function computeGradeField(
         const c = sc + dc;
         if (c < 0 || c >= ncols) continue;
         const i = r * ncols + c;
-        if (!Number.isFinite(field[i])) continue; // land stays land
 
         const distM = Math.sqrt((dr * cellYM) ** 2 + (dc * cellXM) ** 2);
         if (distM > STRUCTURE_RADIUS_M) continue;
         const bonus = maxBonus * (1 - distM / STRUCTURE_RADIUS_M);
-        const withBonus = field[i] + bonus;
-        // max-combine overlapping stamps: never let two weak spots outbid one strong
-        if (withBonus > field[i]) field[i] = Math.min(withBonus, 0.45 * 95 + MAX_STRUCTURE_BONUS);
+        if (bonus > bonusField[i]) bonusField[i] = bonus;
       }
     }
+  }
+
+  const cap = 0.45 * 95 + MAX_STRUCTURE_BONUS;
+  for (let i = 0; i < field.length; i++) {
+    if (Number.isFinite(field[i])) field[i] = Math.min(field[i] + bonusField[i], cap);
   }
 
   return field;

@@ -1,6 +1,8 @@
 import { format } from 'date-fns';
 import type { SpeciesOutlook } from '../hooks/useOIBForecast';
+import type { SpotCandidate } from '../types';
 import { GRADE_COLORS } from '../utils/scoring';
+import { SPOT_KIND_COLOR, SPOT_KIND_LABEL } from '../utils/spotDiscovery';
 
 interface Props {
   outlooks: SpeciesOutlook[];
@@ -14,6 +16,9 @@ interface Props {
   /** Species the grade heatmap is tracking; null = top-ranked */
   selectedSpeciesId: string | null;
   onSelectSpecies: (id: string | null) => void;
+  /** Top structure spots for the selected species (gold-ringed on the map) */
+  bestSpots: SpotCandidate[];
+  onFocusSpot: (spot: SpotCandidate) => void;
   onClose: () => void;
 }
 
@@ -81,7 +86,7 @@ function DriversLine({ outlook }: { outlook: SpeciesOutlook }) {
   );
 }
 
-export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDate, nowDate, demStatus, spotCount, selectedSpeciesId, onSelectSpecies, onClose }: Props) {
+export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDate, nowDate, demStatus, spotCount, selectedSpeciesId, onSelectSpecies, bestSpots, onFocusSpot, onClose }: Props) {
   // The heatmap tracks the top-ranked species until one is explicitly selected
   const effectiveSelectedId = selectedSpeciesId ?? outlooks[0]?.species.id ?? null;
 
@@ -114,7 +119,7 @@ export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDa
           Tide: Shallotte Inlet
           <br />
           {demStatus === 'loading' && 'Scanning bathymetry for structure…'}
-          {demStatus === 'ready' && `${spotCount} structure spots found — tap map markers`}
+          {demStatus === 'ready' && `${spotCount} structure spots · tap a species below, or click any water for what's best there`}
           {demStatus === 'error' && '⚠ High-res depth data unavailable'}
         </div>
       </div>
@@ -149,7 +154,7 @@ export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDa
                   </div>
                   {o.bestWindow && (
                     <div style={{ fontSize: 10, color: '#fbbf24' }}>
-                      Best: {format(o.bestWindow.startTime, 'EEE h a')}–{format(o.bestWindow.endTime, 'h a')} · {o.bestWindow.grade} ({o.bestWindow.avgScore})
+                      ⏰ Best time: {format(o.bestWindow.startTime, 'EEE h a')}–{format(o.bestWindow.endTime, 'h a')} ({o.bestWindow.grade})
                     </div>
                   )}
                 </div>
@@ -162,6 +167,31 @@ export function OIBPanel({ outlooks, loading, waterTempNowF, buoyBiasF, targetDa
 
               {isOpen && (
                 <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {/* Best locations — gold-ringed on the map, tap to jump */}
+                  {bestSpots.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 9, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
+                        📍 Best spots (gold rings on map)
+                      </div>
+                      {bestSpots.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={e => { e.stopPropagation(); onFocusSpot(s); }}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                            background: '#0f172a88', border: '1px solid #33415577', borderRadius: 6,
+                            padding: '4px 7px', marginBottom: 3, cursor: 'pointer', textAlign: 'left',
+                          }}
+                        >
+                          <span style={{ width: 8, height: 8, background: SPOT_KIND_COLOR[s.kind], transform: 'rotate(45deg)', flexShrink: 0 }} />
+                          <span style={{ fontSize: 10, color: '#cbd5e1', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {SPOT_KIND_LABEL[s.kind]}{s.depthFt > 0 ? ` · ${s.depthFt} ft` : ''} · {s.description.split('·').pop()?.trim()}
+                          </span>
+                          <span style={{ fontSize: 10, color: '#38bdf8', flexShrink: 0 }}>→</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <DriversLine outlook={o} />
                   <div style={{ fontSize: 10.5, color: '#cbd5e1', fontStyle: 'italic', lineHeight: 1.45 }}>
                     💡 {o.profile.tactic}

@@ -4,6 +4,18 @@ import { distanceMi } from './geo';
 
 const M_TO_FT = 3.28084;
 
+export const SPOT_KIND_COLOR: Record<SpotCandidate['kind'], string> = {
+  hole: '#22d3ee',
+  ledge: '#a78bfa',
+  reef: '#f59e0b',
+};
+
+export const SPOT_KIND_LABEL: Record<SpotCandidate['kind'], string> = {
+  hole: 'Hole',
+  ledge: 'Drop-off',
+  reef: 'Artificial Reef',
+};
+
 /** High-resolution elevation grid (row 0 = north). Negative elev = below sea level. */
 export interface DemGrid {
   elev: Float32Array;

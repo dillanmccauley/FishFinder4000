@@ -16,21 +16,63 @@ import { useOIBDem } from '../hooks/useOIBDem';
 import { useOIBStructures } from '../hooks/useOIBStructures';
 import { useOIBForecast, type SpeciesOutlook } from '../hooks/useOIBForecast';
 import { DepthShadeLayer, type OverlayMode } from '../utils/depthShadeLayer';
-import { computeGradeField } from '../utils/gradeField';
+import { computeGradeField, spatialScoreAt } from '../utils/gradeField';
+import { demElevAt, SPOT_KIND_COLOR, SPOT_KIND_LABEL, type DemGrid } from '../utils/spotDiscovery';
+import { scoreToGrade } from '../utils/scoring';
 import { OIB_CENTER } from '../data/oibConfig';
 import type { SpotCandidate } from '../types';
 
-const SPOT_KIND_COLOR: Record<SpotCandidate['kind'], string> = {
-  hole: '#22d3ee',
-  ledge: '#a78bfa',
-  reef: '#f59e0b',
-};
+/** Click-anywhere popup: which species are best at this exact location right now */
+function locationPopupHtml(
+  lat: number,
+  lng: number,
+  dem: DemGrid,
+  spots: SpotCandidate[],
+  outlooks: SpeciesOutlook[],
+): string {
+  const elev = demElevAt(dem, lat, lng);
+  if (elev == null || elev >= -0.3) {
+    return `<div style="padding:12px 14px;color:#94a3b8;font-size:12px;">🏖 Land or too shallow to score</div>`;
+  }
+  const depthFt = Math.round(-elev * 3.28084);
 
-const SPOT_KIND_LABEL: Record<SpotCandidate['kind'], string> = {
-  hole: 'Hole',
-  ledge: 'Drop-off',
-  reef: 'Artificial Reef',
-};
+  // Nearest discovered structure within 300 m, for context
+  let structureNote = '';
+  let bestDist = Infinity;
+  for (const s of spots) {
+    const dM = Math.sqrt(((s.lat - lat) * 110574) ** 2 + ((s.lng - lng) * 92400) ** 2);
+    if (dM < bestDist) {
+      bestDist = dM;
+      if (dM <= 300) structureNote = ` · ${Math.round(dM)} m to ${SPOT_KIND_LABEL[s.kind].toLowerCase()}`;
+    }
+  }
+
+  const ranked = outlooks
+    .map(o => {
+      const spatial = spatialScoreAt(dem, spots, o.species, o.profile, lat, lng);
+      if (spatial == null) return null;
+      const score = Math.round(Math.max(0, Math.min(100, 0.55 * o.scoreNow + spatial)));
+      return { o, score, grade: scoreToGrade(score) };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .sort((a, b) => b.score - a.score);
+
+  const rows = ranked.slice(0, 4).map(({ o, score, grade }) => {
+    const gc = GRADE_COLORS[grade];
+    return `<div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+      <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;background:${gc};color:#fff;font-size:10px;font-weight:800;">${grade}</span>
+      <span style="color:#e2e8f0;font-size:11px;">${o.species.commonName}</span>
+      <span style="color:${gc};font-size:11px;font-weight:700;margin-left:auto;">${score}</span>
+    </div>`;
+  }).join('');
+
+  return `<div style="padding:12px 14px;min-width:250px;">
+    <div style="color:#f1f5f9;font-weight:800;font-size:12px;">📍 This spot right now</div>
+    <div style="color:#94a3b8;font-size:11px;margin-top:3px;">${depthFt} ft deep${structureNote}</div>
+    <div style="border-top:1px solid #334155;margin-top:8px;padding-top:2px;">${rows}</div>
+    <div style="color:#64748b;font-size:9px;margin-top:6px;">Scored for this exact location at the scrubber time</div>
+  </div>`;
+}
 
 /** Plain-HTML popup for a discovered spot: structure info + best species right now */
 function spotPopupHtml(spot: SpotCandidate, outlooks: SpeciesOutlook[]): string {
@@ -75,6 +117,18 @@ const HOTSPOT_TYPE_SIZE: Record<string, number> = {
   reef: 34,
   pass: 38,
 };
+
+function makeSpotIcon(spot: SpotCandidate, highlighted: boolean): L.DivIcon {
+  const color = SPOT_KIND_COLOR[spot.kind];
+  const size = highlighted ? 18 : spot.structureScore >= 80 ? 16 : 13;
+  const ring = highlighted ? `box-shadow:0 0 0 3px #fbbf24, 0 0 14px #fbbf24cc;` : `box-shadow:0 0 8px ${color}aa;`;
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:${size}px;height:${size}px;background:${color};transform:rotate(45deg);border:2px solid #0f172a;${ring}"></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
 
 function makeZoneIcon(grade: string, color: string, type: string, isCustom = false): L.DivIcon {
   const size = HOTSPOT_TYPE_SIZE[type] ?? 34;
@@ -165,6 +219,40 @@ export function FishMap({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [oibMode, dem, allSpots, selectedOutlook?.species.id]);
 
+  // Top structure spots for the selected species: structure affinity + depth fit
+  const bestSpotsForSelected = useMemo(() => {
+    if (!selectedOutlook || !allSpots.length) return [];
+    const { profile, species } = selectedOutlook;
+    const [lo, hi] = species.depthRangeFt;
+    const range = Math.max(hi - lo, 1);
+    return allSpots
+      .map(spot => {
+        const affinity = profile.structureAffinity[spot.kind] ?? 0.3;
+        let fit = affinity * spot.structureScore;
+        if (spot.depthFt > 0) {
+          const dist = spot.depthFt >= lo && spot.depthFt <= hi
+            ? 0
+            : Math.min(Math.abs(spot.depthFt - lo), Math.abs(spot.depthFt - hi));
+          const depthFit = dist === 0 ? 95 : dist <= range * 0.5 ? 75 : dist <= range * 1.5 ? 50 : dist <= range * 3 ? 25 : 10;
+          fit += depthFit * 0.35;
+        }
+        return { spot, fit };
+      })
+      .sort((a, b) => b.fit - a.fit)
+      .slice(0, 3)
+      .map(x => x.spot);
+  }, [selectedOutlook, allSpots]);
+
+  // Pan to a spot and open its popup (used by the panel's "best spots" rows)
+  const focusSpot = (spot: SpotCandidate) => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.flyTo([spot.lat, spot.lng], Math.max(map.getZoom(), 14), { duration: 0.8 });
+    const idx = allSpots.findIndex(s => s.id === spot.id);
+    const marker = spotMarkersRef.current[idx];
+    if (marker) setTimeout(() => marker.openPopup(), 850);
+  };
+
   // Combined hotspot map (regular + custom)
   const allHotspotsMap = useMemo(() => {
     const m = new Map<string, Hotspot>(HOTSPOTS.map(h => [h.id, h]));
@@ -222,15 +310,23 @@ export function FishMap({
         setIsCreating(false);
         return;
       }
-      // In OIB mode the grade overlay + spot markers own the map — no pin
-      if (oibMode) return;
+      // OIB mode: click any water → ranked species for that exact location
+      if (oibMode) {
+        if (dem) {
+          L.popup({ maxWidth: 290 })
+            .setLatLng(e.latlng)
+            .setContent(locationPopupHtml(loc.lat, loc.lng, dem, allSpots, oibForecast.outlooks))
+            .openOn(map);
+        }
+        return;
+      }
       // Drop pin for spot forecast
       setPinLocation(loc);
     };
 
     map.on('click', handler);
     return () => { map.off('click', handler); };
-  }, [isCreating, onRequestCreateZone, oibMode]);
+  }, [isCreating, onRequestCreateZone, oibMode, dem, allSpots, oibForecast.outlooks]);
 
   // OIB mode: fly to the area on entry
   useEffect(() => {
@@ -289,20 +385,24 @@ export function FishMap({
     if (!oibMode) return;
 
     allSpots.forEach(spot => {
-      const color = SPOT_KIND_COLOR[spot.kind];
-      const size = spot.structureScore >= 80 ? 16 : 13;
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="width:${size}px;height:${size}px;background:${color};transform:rotate(45deg);border:2px solid #0f172a;box-shadow:0 0 8px ${color}aa;"></div>`,
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
-      });
-      const marker = L.marker([spot.lat, spot.lng], { icon })
+      const marker = L.marker([spot.lat, spot.lng], { icon: makeSpotIcon(spot, false) })
         .bindPopup('', { maxWidth: 300 })
         .addTo(map);
       spotMarkersRef.current.push(marker);
     });
   }, [oibMode, allSpots]);
+
+  // Gold-ring highlight on the selected species' best spots
+  useEffect(() => {
+    if (!oibMode) return;
+    const topIds = new Set(bestSpotsForSelected.map(s => s.id));
+    spotMarkersRef.current.forEach((marker, i) => {
+      const spot = allSpots[i];
+      if (!spot) return;
+      marker.setIcon(makeSpotIcon(spot, topIds.has(spot.id)));
+      marker.setZIndexOffset(topIds.has(spot.id) ? 500 : 0);
+    });
+  }, [oibMode, allSpots, bestSpotsForSelected]);
 
   // Refresh spot popup content when the forecast changes — setContent keeps open popups open
   useEffect(() => {
@@ -486,6 +586,8 @@ export function FishMap({
           spotCount={allSpots.length}
           selectedSpeciesId={selectedSpeciesId}
           onSelectSpecies={setSelectedSpeciesId}
+          bestSpots={bestSpotsForSelected}
+          onFocusSpot={focusSpot}
           onClose={() => setOibMode(false)}
         />
       )}
