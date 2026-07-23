@@ -19,8 +19,29 @@ import { DepthShadeLayer, type OverlayMode } from '../utils/depthShadeLayer';
 import { computeGradeField, spatialScoreAt } from '../utils/gradeField';
 import { demElevAt, SPOT_KIND_COLOR, SPOT_KIND_LABEL, type DemGrid } from '../utils/spotDiscovery';
 import { scoreToGrade } from '../utils/scoring';
-import { REGIONS, type FishingRegion } from '../data/regions';
+import { REGIONS, REGIONS_BY_ID, inEnvelope, makeDynamicRegion, type FishingRegion } from '../data/regions';
+import { useTideStations, nearestTideStation } from '../hooks/useTideStations';
 import type { SpotCandidate } from '../types';
+
+const RECENTS_KEY = 'ff4k-recent-regions';
+
+function loadRecentRegions(): FishingRegion[] {
+  try {
+    const raw = localStorage.getItem(RECENTS_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list)
+      ? list.filter((r): r is FishingRegion => !!r && !!r.id && !!r.bbox && !!r.tideStationId)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentRegion(region: FishingRegion): FishingRegion[] {
+  const list = [region, ...loadRecentRegions().filter(r => r.id !== region.id)].slice(0, 3);
+  try { localStorage.setItem(RECENTS_KEY, JSON.stringify(list)); } catch { /* storage full/blocked */ }
+  return list;
+}
 
 /** Click-anywhere popup: which species are best at this exact location right now */
 function locationPopupHtml(
@@ -191,6 +212,8 @@ export function FishMap({
   const [pinLocation, setPinLocation] = useState<LatLng | null>(null);
   const [activeRegion, setActiveRegion] = useState<FishingRegion | null>(null);
   const [regionMenuOpen, setRegionMenuOpen] = useState(false);
+  const [mapCenter, setMapCenter] = useState<LatLng>(userLocation);
+  const [recentRegions, setRecentRegions] = useState<FishingRegion[]>(loadRecentRegions);
   const [overlayMode, setOverlayMode] = useState<OverlayMode | 'off'>('grade');
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<string | null>(null);
 
@@ -201,7 +224,28 @@ export function FishMap({
     nowDate,
   });
 
-  // Config-driven local mode (Ocean Isle Beach, Wilmington, …)
+  // Tide-station index for dynamic regions — loads when the menu opens
+  const { stations: tideStations, loading: stationsLoading } = useTideStations(regionMenuOpen);
+
+  const activateRegion = (region: FishingRegion) => {
+    setSelectedSpeciesId(null);
+    setActiveRegion(region);
+    setRegionMenuOpen(false);
+  };
+
+  const activateDynamicRegion = () => {
+    const map = mapRef.current;
+    if (!map || !tideStations.length) return;
+    const c = map.getCenter();
+    const center = { lat: c.lat, lng: c.lng };
+    const station = nearestTideStation(tideStations, center);
+    if (!station) return;
+    const region = makeDynamicRegion(center, map.getZoom(), station);
+    setRecentRegions(saveRecentRegion(region));
+    activateRegion(region);
+  };
+
+  // Config-driven local mode (curated regions + dynamic "fish this area")
   const { dem, spots: demSpots, loading: demLoading, error: demError } = useRegionDem(activeRegion);
   const { reefSpots } = useRegionStructures(activeRegion);
   const regionForecast = useRegionForecast(activeRegion, targetDate, nowDate);
@@ -285,6 +329,12 @@ export function FishMap({
     ).addTo(map);
 
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+    // Track center for the dynamic-region envelope check
+    map.on('moveend', () => {
+      const c = map.getCenter();
+      setMapCenter({ lat: c.lat, lng: c.lng });
+    });
 
     mapRef.current = map;
     if (onMapReady) onMapReady(map);
@@ -610,15 +660,40 @@ export function FishMap({
         >
           🎯 {activeRegion ? `Exit ${activeRegion.name}` : 'Local Mode'}
         </button>
-        {regionMenuOpen && !activeRegion && REGIONS.map(r => (
-          <button
-            key={r.id}
-            onClick={() => { setActiveRegion(r); setSelectedSpeciesId(null); setRegionMenuOpen(false); }}
-            style={btnStyle(false, '#f59e0b', '#fbbf24')}
-          >
-            {r.name}
-          </button>
-        ))}
+        {regionMenuOpen && !activeRegion && (
+          <>
+            {/* Dynamic region at the current map view — NC/SC envelope for now */}
+            <button
+              onClick={activateDynamicRegion}
+              disabled={!inEnvelope(mapCenter) || stationsLoading || !tideStations.length}
+              title={inEnvelope(mapCenter)
+                ? 'Analyze the water around the current map view'
+                : 'NC & SC coasts only (for now)'}
+              style={{
+                ...btnStyle(false, '#f59e0b', '#fbbf24'),
+                opacity: inEnvelope(mapCenter) ? 1 : 0.45,
+                cursor: inEnvelope(mapCenter) ? 'pointer' : 'not-allowed',
+              }}
+            >
+              📍 {stationsLoading ? 'Finding tide stations…' : 'Fish this area'}
+            </button>
+            {!inEnvelope(mapCenter) && <HintPill>NC &amp; SC coasts only (for now)</HintPill>}
+
+            {/* Curated regions */}
+            {REGIONS.map(r => (
+              <button key={r.id} onClick={() => activateRegion(r)} style={btnStyle(false, '#f59e0b', '#fbbf24')}>
+                {r.name}
+              </button>
+            ))}
+
+            {/* Recent dynamic areas */}
+            {recentRegions.filter(r => !REGIONS_BY_ID.has(r.id)).map(r => (
+              <button key={r.id} onClick={() => activateRegion(r)} style={btnStyle(false, '#0e7490', '#22d3ee')}>
+                ↺ {r.name}
+              </button>
+            ))}
+          </>
+        )}
 
         {/* Overlay cycle: grade heatmap → depth shading → off (local mode only) */}
         {activeRegion && (

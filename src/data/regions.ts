@@ -39,8 +39,8 @@ export interface RegionSpeciesProfile {
   tactic: string;
 }
 
-/** Coastal NC species set — used by both current regions */
-const NC_SPECIES_IDS = [
+/** Coastal Carolinas species set — valid for both NC and SC */
+const CAROLINA_SPECIES_IDS = [
   'red-drum',
   'spotted-seatrout',
   'flounder',
@@ -68,7 +68,7 @@ export const REGIONS: FishingRegion[] = [
       { name: 'Shallotte Inlet', loc: { lat: 33.8955, lng: -78.3705 } },
       { name: 'Tubbs Inlet', loc: { lat: 33.8905, lng: -78.5075 } },
     ],
-    speciesIds: NC_SPECIES_IDS,
+    speciesIds: CAROLINA_SPECIES_IDS,
     // Barrier-island axis: Tubbs → Shallotte
     oceanDivider: [
       { lat: 33.8905, lng: -78.5075 },
@@ -93,7 +93,7 @@ export const REGIONS: FishingRegion[] = [
       { name: 'Masonboro Inlet', loc: { lat: 34.1815, lng: -77.8115 } },
       { name: 'Carolina Beach Inlet', loc: { lat: 34.0705, lng: -77.8785 } },
     ],
-    speciesIds: NC_SPECIES_IDS,
+    speciesIds: CAROLINA_SPECIES_IDS,
     // Barrier-island axis: Figure Eight → Wrightsville → Masonboro → Carolina Beach
     oceanDivider: [
       { lat: 34.055, lng: -77.885 },
@@ -106,6 +106,60 @@ export const REGIONS: FishingRegion[] = [
 ];
 
 export const REGIONS_BY_ID = new Map(REGIONS.map(r => [r.id, r]));
+
+/**
+ * Where dynamic "fish this area" regions may be created — the NC/SC coast for
+ * now. Widening this envelope (plus latitude-based species selection) is the
+ * whole switch for expanding to more of the US coast.
+ */
+export const CAROLINAS_ENVELOPE: BBox = {
+  sw: { lat: 32.0, lng: -81.7 },
+  ne: { lat: 36.6, lng: -75.3 },
+};
+
+export function inEnvelope(loc: LatLng): boolean {
+  return (
+    loc.lat >= CAROLINAS_ENVELOPE.sw.lat && loc.lat <= CAROLINAS_ENVELOPE.ne.lat &&
+    loc.lng >= CAROLINAS_ENVELOPE.sw.lng && loc.lng <= CAROLINAS_ENVELOPE.ne.lng
+  );
+}
+
+export interface TideStation {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+const DYN_BBOX_LNG = 0.26; // ~15 mi
+const DYN_BBOX_LAT = 0.2;  // ~14 mi
+
+/**
+ * Build a region on the fly from the current map view. Every data input is
+ * auto-discovered (DEM, reefs, buoys by bbox; tide station passed in from the
+ * CO-OPS metadata index). Dynamic regions have no curated inlet list or
+ * ocean-divider polyline — descriptions omit inlet distances and the per-pixel
+ * zone mask is off, everything else works identically to curated regions.
+ */
+export function makeDynamicRegion(center: LatLng, zoom: number, station: TideStation): FishingRegion {
+  // Quantized id so nearby activations share the per-region DEM/reef/buoy caches
+  const id = `dyn-${center.lat.toFixed(2)}-${center.lng.toFixed(2)}`;
+  return {
+    id,
+    name: station.name,
+    bbox: {
+      sw: { lat: center.lat - DYN_BBOX_LAT / 2, lng: center.lng - DYN_BBOX_LNG / 2 },
+      ne: { lat: center.lat + DYN_BBOX_LAT / 2, lng: center.lng + DYN_BBOX_LNG / 2 },
+    },
+    center,
+    zoom: Math.max(11, Math.min(13, Math.round(zoom))),
+    tideStationId: station.id,
+    tideStationName: station.name,
+    inlets: [],
+    speciesIds: CAROLINA_SPECIES_IDS,
+    demSize: { width: 1300, height: 1200 }, // ~18 m cells
+  };
+}
 
 /** Species-level profiles shared across regions (NC coastal behavior) */
 export const SPECIES_PROFILES: Record<string, RegionSpeciesProfile> = {
