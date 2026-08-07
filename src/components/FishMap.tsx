@@ -21,6 +21,8 @@ import { demElevAt, SPOT_KIND_COLOR, SPOT_KIND_LABEL, type DemGrid } from '../ut
 import { scoreToGrade } from '../utils/scoring';
 import { REGIONS, REGIONS_BY_ID, inEnvelope, makeDynamicRegion, type FishingRegion } from '../data/regions';
 import { useTideStations, nearestTideStation } from '../hooks/useTideStations';
+import { GarminExportModal } from './GarminExportModal';
+import { rankSpotsForSpecies } from '../utils/gpxExport';
 import type { SpotCandidate } from '../types';
 
 const RECENTS_KEY = 'ff4k-recent-regions';
@@ -216,6 +218,7 @@ export function FishMap({
   const [recentRegions, setRecentRegions] = useState<FishingRegion[]>(loadRecentRegions);
   const [overlayMode, setOverlayMode] = useState<OverlayMode | 'off'>('grade');
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const { hourlyScores } = useLocationForecast({
     pin: pinLocation,
@@ -268,25 +271,7 @@ export function FishMap({
   // Top structure spots for the selected species: structure affinity + depth fit
   const bestSpotsForSelected = useMemo(() => {
     if (!selectedOutlook || !allSpots.length) return [];
-    const { profile, species } = selectedOutlook;
-    const [lo, hi] = species.depthRangeFt;
-    const range = Math.max(hi - lo, 1);
-    return allSpots
-      .map(spot => {
-        const affinity = profile.structureAffinity[spot.kind] ?? 0.3;
-        let fit = affinity * spot.structureScore;
-        if (spot.depthFt > 0) {
-          const dist = spot.depthFt >= lo && spot.depthFt <= hi
-            ? 0
-            : Math.min(Math.abs(spot.depthFt - lo), Math.abs(spot.depthFt - hi));
-          const depthFit = dist === 0 ? 95 : dist <= range * 0.5 ? 75 : dist <= range * 1.5 ? 50 : dist <= range * 3 ? 25 : 10;
-          fit += depthFit * 0.35;
-        }
-        return { spot, fit };
-      })
-      .sort((a, b) => b.fit - a.fit)
-      .slice(0, 3)
-      .map(x => x.spot);
+    return rankSpotsForSpecies(allSpots, selectedOutlook).slice(0, 3);
   }, [selectedOutlook, allSpots]);
 
   // Pan to a spot and open its popup (used by the panel's "best spots" rows)
@@ -646,6 +631,19 @@ export function FishMap({
         />
       )}
 
+      {/* Garmin GPX export */}
+      {exportOpen && activeRegion && dem && (
+        <GarminExportModal
+          region={activeRegion}
+          spots={allSpots}
+          outlooks={regionForecast.outlooks}
+          dem={dem}
+          targetDate={targetDate}
+          selectedOutlook={selectedOutlook}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
+
       {/* Map control buttons — shift left of the region panel when it's open */}
       <div style={{ position: 'absolute', top: 56, right: activeRegion ? 312 : 12, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 6 }}>
 
@@ -693,6 +691,17 @@ export function FishMap({
               </button>
             ))}
           </>
+        )}
+
+        {/* Export discovered spots to a Garmin chartplotter */}
+        {activeRegion && dem && allSpots.length > 0 && (
+          <button
+            onClick={() => setExportOpen(true)}
+            title="Send these spots to your Garmin as GPX waypoints"
+            style={btnStyle(false, '#16a34a', '#4ade80')}
+          >
+            📤 To Garmin
+          </button>
         )}
 
         {/* Overlay cycle: grade heatmap → depth shading → off (local mode only) */}
